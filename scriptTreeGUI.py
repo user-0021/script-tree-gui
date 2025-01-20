@@ -41,10 +41,9 @@ def openFile(dir,ex):
 	iDir = os.path.abspath(os.path.dirname(__file__))
 	return tkinter.filedialog.askopenfilename(filetypes=fTyp, initialdir=iDir)
 
-def openFolder(dir,ex):
-	fTyp = [(dir, ex)]
+def openFolder():
 	iDir = os.path.abspath(os.path.dirname(__file__))
-	return tkinter.filedialog.askdirectory(filetypes=fTyp, initialdir=iDir)
+	return tkinter.filedialog.askdirectory(initialdir=iDir)
 
 def loadFile(path):
 	l = list()
@@ -56,6 +55,28 @@ def loadFile(path):
 	return l
 
 
+def saveFile(path,data):
+	with open(path,"w") as f:
+		sList = list()
+		for e in data:
+			sList.append(e[0])
+		
+		f.write("\n".join(sList))
+
+def scanFolder(folder):
+	fList = list()
+	for fileName in os.listdir(folder):
+		filePath = os.path.join(folder,fileName)
+		if os.path.isfile(filePath):
+			if os.path.splitext(fileName)[1] == '.node':
+				fList.append(fileName)
+
+	return fList
+
+			
+
+
+
 
 class Application(tk.Frame):
 	def __init__(self, master=None):
@@ -64,6 +85,7 @@ class Application(tk.Frame):
 		#各種変数の生成
 		self.nodeAreaRatio = 0.7
 		self.mouseGrip = 0,"None"
+		self.opendFolder = list()
 
 		#ウィンドウの生成
 		self.master.title("scriptTreeGUI")
@@ -75,7 +97,7 @@ class Application(tk.Frame):
 		self.master.config(menu=self.menubar)
 		filemenu = tk.Menu(self.menubar, tearoff=0)
 		filemenu.add_command(label="Open Node File", command=self.openNodeFile)
-		filemenu.add_command(label="Open Node Folder")
+		filemenu.add_command(label="Open Node Folder", command=self.openNodeFolder)
 		self.menubar.add_cascade(label="File",menu=filemenu)
 		self.menubar.add_separator()
 
@@ -101,6 +123,8 @@ class Application(tk.Frame):
 		self.library = tk.Frame(self.subWindow)
 		self.subWindow.add(self.library, text=' library ')
 		self.nodeList = tk.Listbox(self.library, selectmode="single", height=6)
+		self.initList()
+		self.nodeList.bind('<<ListboxSelect>>', self.nodeListSelectHandller)
 		scrollbar = ttk.Scrollbar(self.library, orient='vertical', command=self.nodeList.yview)
 		self.nodeList['yscrollcommand'] = scrollbar.set
 		self.nodeList.pack(side='left', fill="both", expand=True)
@@ -127,25 +151,41 @@ class Application(tk.Frame):
 			self.nodeAreaRatio = (event.x_root - self.master.winfo_x()) / self.master.winfo_width() 
 			self.resizeChildWeight()
 	
-	def openNodeFile(self):
-		fileName = openFile("すべてのファイル","*")
-		scriptTree.expect(">>>")
-		scriptTree.sendline("check "+fileName)
-		scriptTree.expect("\n")
-		scriptTree.expect("\n")
-		if scriptTree.before.decode(encoding='utf-8').split(' ')[2] != 'not':
-			if fileName not in nodeFileList:
-				nodeFileList.append(fileName)
-	
-	def openNodeFolder(self):
-		fileName = openFolder(" ","*")
-		scriptTree.expect(">>>")
-		scriptTree.sendline("check "+fileName)
-		scriptTree.expect("\n")
-		scriptTree.expect("\n")
-		if scriptTree.before.decode(encoding='utf-8').split(' ')[2] != 'not':
-			if fileName not in nodeFileList:
-				nodeFileList.append(fileName)
+	def nodeListSelectHandller(self,event):
+		#get index
+		selectIndex = self.nodeList.curselection()[0]
+		
+		#if folderList selected
+		if selectIndex and selectIndex >= len(nodeFileList):
+			iter = len(nodeFileList)
+
+			for folder in nodeFolderList:
+				#if folder name select
+				if iter == selectIndex:
+					if folder[0] in self.opendFolder:
+						#open
+						self.opendFolder.remove(folder[0])
+						self.nodeList.delete(iter)
+						self.nodeList.insert(iter,folder[0] + " ▶ ") 
+						for file in folder[1:]:
+							self.nodeList.delete(iter+1)
+					else:
+						#close
+						self.opendFolder.append(folder[0])
+						self.nodeList.delete(iter)
+						self.nodeList.insert(iter,folder[0] + " ▼ ")
+						for file in folder[1:]:
+							iter+=1
+							self.nodeList.insert(iter,file)
+
+					break
+
+				#inclement
+				if folder[0] in self.opendFolder:
+					iter += len(folder)
+				else:
+					iter += 1
+					
 
 	#####################################################################
 
@@ -158,6 +198,50 @@ class Application(tk.Frame):
 
 		self.nodeArea.configure(width=self.master.winfo_width() * self.nodeAreaRatio)
 		self.subFlame.configure(width=max(0.0,self.master.winfo_width() * (1.0 - self.nodeAreaRatio) - 7))
+	
+	def openNodeFile(self):
+		fileName = openFile("nodeファイル","*.node")
+		if len(fileName) != 0:
+			isInclude = False
+			for e in nodeFileList:
+				if e[0] == fileName:
+					isInclude = True
+					break
+
+			if not isInclude:
+				files = list()
+				files.append(fileName)
+				self.insertFile(files)
+	
+	def openNodeFolder(self):
+		folderNmae = openFolder()
+		if len(folderNmae) != 0:
+			isInclude = False
+			for e in nodeFileList:
+				if e[0] == folderNmae:
+					isInclude = True
+					break
+
+			if not isInclude:
+				folderList = list()
+				folderList.append(folderNmae)
+				folderList += scanFolder(folderNmae)
+				self.insertFolder(folderList)
+	
+	def initList(self):
+		for file in nodeFileList:
+			self.nodeList.insert(tkinter.END,file[0])
+		
+		for folder in nodeFolderList:
+			self.nodeList.insert(tkinter.END,folder[0] + " ▶ ")
+
+	def insertFile(self,fileList):
+		self.nodeList.insert(len(nodeFileList),fileList[0])
+		nodeFileList.append(fileList)
+
+	def insertFolder(self,folderList):
+		self.nodeList.insert(tkinter.END,folderList[0] + " ▶ ")
+		nodeFolderList.append(folderList)
 
 	#####################################################################
 
@@ -187,6 +271,8 @@ if __name__ == "__main__" and pf.system() == "Linux":
 	# load data
 	nodeFileList = loadFile(fileListPath)
 	nodeFolderList = loadFile(folderListPath)
+	for folder in nodeFolderList:
+		folder += scanFolder(folder[0])
 
 	# lunch
 	root = tk.Tk()
@@ -196,21 +282,12 @@ if __name__ == "__main__" and pf.system() == "Linux":
 	sig.signal(sig.SIGINT, sigintHandle)
 	root.bind('<Control-c>', ctrlChandle) 
 
-	print(nodeFileList)
-	print(nodeFolderList)
-
 	# loop
 	app.mainloop()
 
 	# save data
-	# fFileList = open(fileListPath,"w")
-	# fFolderList = open(folderListPath,"w")
-
-	# pickle.dump(nodeFileList,fFileList)
-	# pickle.dump(nodeFolderList,fFolderList)
-
-	# fFileList.close()
-	# fFolderList.close()
+	saveFile(fileListPath,nodeFileList)
+	saveFile(folderListPath,nodeFolderList)
 
 	#quit
 	scriptTree.expect(">>>")
