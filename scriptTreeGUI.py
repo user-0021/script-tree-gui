@@ -33,7 +33,7 @@ def checkAreaBorder(value,center,halfWidth):
 	return (value > (center-halfWidth)) and value < (center+halfWidth)
 
 
-def isInWeight(x,y,wight):
+def isInWidget(x,y,wight):
 	return x > wight.winfo_x() and x < (wight.winfo_x()+ wight.winfo_width()) and y > wight.winfo_y() and y < (wight.winfo_y()+ wight.winfo_height())
 
 def openFile(dir,ex):
@@ -84,14 +84,17 @@ class Application(tk.Frame):
 
 		#各種変数の生成
 		self.nodeAreaRatio = 0.7
-		self.mouseGrip = 0,"None"
+		self.mouseGrip = 0,None
 		self.opendFolder = list()
 
 		#ウィンドウの生成
 		self.master.title("scriptTreeGUI")
 		self.master.geometry("400x300")	
 		self.master.bind("<Configure>", self.resizeWindowHandller)
-
+		self.master.bind("<Button-1>",self.MouseGrap)
+		self.master.bind("<ButtonRelease-1>",self.MouseRelease)
+		self.master.bind("<Motion>",self.MouseMotion)
+		
 		#メニューの作成
 		self.menubar = tk.Menu(self.master)
 		self.master.config(menu=self.menubar)
@@ -110,7 +113,6 @@ class Application(tk.Frame):
 		self.subFlame.grid(row = 1, column = 2,sticky = tk.NSEW)
 		self.master.grid_rowconfigure(1, weight=1)
 		self.flameBorder.bind("<Button-1>",self.flameBorderGrap)
-		self.flameBorder.bind("<ButtonRelease-1>",self.flameBorderRelease)
 		self.flameBorder.bind("<Motion>",self.flameBorderMotion)
 
 		#Canvas生成
@@ -127,6 +129,7 @@ class Application(tk.Frame):
 		self.nodeList.bind('<<ListboxSelect>>', self.nodeListSelectHandller)
 		scrollbar = ttk.Scrollbar(self.library, orient='vertical', command=self.nodeList.yview)
 		self.nodeList['yscrollcommand'] = scrollbar.set
+		scrollbar.pack(side='right',fill="y")
 		self.nodeList.pack(side='left', fill="both", expand=True)
 		self.info = tk.Frame(self.subWindow)
 		self.subWindow.add(self.info, text=' info ')
@@ -139,29 +142,54 @@ class Application(tk.Frame):
 	def flameBorderGrap(self,event):
 		#グラップチェック
 		if self.mouseGrip[0] == 0:
-			self.mouseGrip = 1,"flameBorder"
-	
-	def flameBorderRelease(self,event):
-		#リリース
-		if self.mouseGrip[0] == 1:
-			self.mouseGrip = 0,"None"
+			self.mouseGrip = 2,"flameBorder"
 
 	def flameBorderMotion(self,event):
-		if self.mouseGrip[0] == 1 and isInWeight(event.x_root,event.y_root,self.master):
+		if self.mouseGrip[0] == 2 and isInWidget(event.x_root,event.y_root,self.master):
 			self.nodeAreaRatio = (event.x_root - self.master.winfo_x()) / self.master.winfo_width() 
 			self.resizeChildWeight()
+
+	def MouseGrap(self,event):
+		#グラップチェック
+		if self.mouseGrip[0] == 0:
+			self.mouseGrip = 1,None
+
+	def MouseRelease(self,event):
+		#リリース
+		if self.mouseGrip[0] == 2:
+			self.mouseGrip = 0,None
+		elif self.mouseGrip[0] == 3:
+			if self.mouseGrip[1] != None:
+				self.mouseGrip[1].destroy()
+			self.mouseGrip = 0,None
+		else:
+			self.mouseGrip = 0,None
+	
+	def MouseMotion(self,event):
+		if self.mouseGrip[0] == 3:
+			if self.mouseGrip[1] == None:
+				self.mouseGrip = 3,tk.Label(self.master, text=self.nodeList.get(self.nodeList.curselection()[0]))
+			
+			# 座標計算
+			x = self.master.winfo_pointerx() - self.master.winfo_rootx()
+			y = self.master.winfo_pointery() -self.master.winfo_rooty()
+
+			self.mouseGrip[1].place(x=x, y=y)
+
 	
 	def nodeListSelectHandller(self,event):
 		#get index
 		selectIndex = self.nodeList.curselection()[0]
-		
-		#if folderList selected
-		if selectIndex and selectIndex >= len(nodeFileList):
+
+		isFile = True
+		if selectIndex >= len(nodeFileList):
 			iter = len(nodeFileList)
 
 			for folder in nodeFolderList:
 				#if folder name select
 				if iter == selectIndex:
+					isFile = False
+
 					if folder[0] in self.opendFolder:
 						#open
 						self.opendFolder.remove(folder[0])
@@ -176,7 +204,7 @@ class Application(tk.Frame):
 						self.nodeList.insert(iter,folder[0] + " ▼ ")
 						for file in folder[1:]:
 							iter+=1
-							self.nodeList.insert(iter,file)
+							self.nodeList.insert(iter,"    " + file)
 
 					break
 
@@ -185,6 +213,10 @@ class Application(tk.Frame):
 					iter += len(folder)
 				else:
 					iter += 1
+
+		#グラップチェック
+		if self.mouseGrip[0] == 0 and isFile:
+			self.mouseGrip = 3,None
 					
 
 	#####################################################################
@@ -217,7 +249,7 @@ class Application(tk.Frame):
 		folderNmae = openFolder()
 		if len(folderNmae) != 0:
 			isInclude = False
-			for e in nodeFileList:
+			for e in nodeFolderList:
 				if e[0] == folderNmae:
 					isInclude = True
 					break
