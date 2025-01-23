@@ -211,6 +211,8 @@ class Application(tk.Frame):
 						pipeList = list()
 						scriptTree.expect("\n")
 						line = scriptTree.before.decode(encoding='utf-8')
+						inputCount = 0
+						outputCount = 0
 						while not '--------------------------------------------------------' in line:
 							scriptTree.expect("\n")
 							line = scriptTree.before.decode(encoding='utf-8')
@@ -236,6 +238,13 @@ class Application(tk.Frame):
 										scriptTree.expect("\n")
 									line = scriptTree.before.decode(encoding='utf-8')
 									pipeList.append((pipeName,pipeType,pipeUnit,pipeLength))
+
+									if pipeType == 'OUT':
+										outputCount+= 1
+									else:
+										inputCount += 1 
+						
+						node.height = max(outputCount,inputCount) * 16
 
 						
 						self.paintNodes.append((node,pipeList))
@@ -326,6 +335,17 @@ class Application(tk.Frame):
 		for (node,pipes) in self.paintNodes:
 			self.nodeArea.create_rectangle(node.x,node.y,node.x+node.width,node.y+node.height,fill="gray")
 			self.nodeArea.create_text(node.x+ node.width/2,node.y-8,text=node.name)
+			inputCount = 0
+			outputCount = 0
+			for (pipeName,pipeType,pipeUnit,pipeLength) in pipes:
+				if pipeType == 'OUT':
+					self.nodeArea.create_text(node.x+ node.width,(node.y+8) + outputCount * 16 ,text=pipeName)
+					outputCount += 1
+				else:
+					self.nodeArea.create_text(node.x,(node.y+8) + inputCount * 16 ,text=pipeName)
+					inputCount += 1
+
+	
 		self.master.after(20,self.nodeAreaDraw)
 
 	def resizeChildWeight(self):
