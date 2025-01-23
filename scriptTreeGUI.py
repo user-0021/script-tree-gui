@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 import tkinter.filedialog
 import pexpect
+from dataclasses import dataclass
 
 #GLOBAL
 workSpace = os.environ['HOME'] + '/scriptTreeWorkSpace'
@@ -16,6 +17,7 @@ folderListPath = os.environ['HOME'] + '/scriptTreeWorkSpace/data/folderList.txt'
 scriptTree = None
 nodeFileList = list()
 nodeFolderList = list()
+nodeIdlate = 0
 
 #callback
 def sigintHandle(signum, r):
@@ -73,10 +75,15 @@ def scanFolder(folder):
 
 	return fList
 
-			
-
-
-
+@dataclass	
+class NodeType:
+	path : str
+	name : str
+	id : str
+	width : int
+	height : int
+	x : int
+	y : int
 
 class Application(tk.Frame):
 	def __init__(self, master=None):
@@ -86,6 +93,7 @@ class Application(tk.Frame):
 		self.nodeAreaRatio = 0.7
 		self.mouseGrip = 0,None
 		self.opendFolder = list()
+		self.paintNodes = list()
 
 		#ウィンドウの生成
 		self.master.title("scriptTreeGUI")
@@ -116,8 +124,9 @@ class Application(tk.Frame):
 		self.flameBorder.bind("<Motion>",self.flameBorderMotion)
 
 		#Canvas生成
-		self.nodeArea = tk.Canvas(self.mainFlame, relief='groove')
+		self.nodeArea = tk.Canvas(self.mainFlame, relief='groove', background="white")
 		self.nodeArea.pack(side='left', fill="both", expand=True)
+		self.nodeArea.bind("<Button-1>",self.NodeGrap)
 
 		#Notebook生成
 		self.subWindow= ttk.Notebook(self.subFlame)
@@ -134,6 +143,8 @@ class Application(tk.Frame):
 		self.info = tk.Frame(self.subWindow)
 		self.subWindow.add(self.info, text=' info ')
 
+		self.master.after(20,self.nodeAreaDraw)
+
 	############################CallBacks##############################
 
 	def resizeWindowHandller(self,event):
@@ -149,10 +160,23 @@ class Application(tk.Frame):
 			self.nodeAreaRatio = (event.x_root - self.master.winfo_x()) / self.master.winfo_width() 
 			self.resizeChildWeight()
 
+	def NodeGrap(self,event):
+		#グラップチェック
+		if self.mouseGrip[0] == 0:
+			self.mouseGrip = 1,None
+			x = self.master.winfo_pointerx() - self.master.winfo_rootx()
+			y = self.master.winfo_pointery() -self.master.winfo_rooty()
+			for (index,(node,pipes)) in enumerate(reversed(self.paintNodes)):
+				if x > node.x and y > node.y and x < (x + node.width) and y < (y + node.height):
+					self.paintNodes[len(self.paintNodes) - index - 1],self.paintNodes[-1] = self.paintNodes[-1],self.paintNodes[len(self.paintNodes) - index - 1]
+					self.mouseGrip = 4,(-1,x - node.x,y - node.y)
+					break
+
 	def MouseGrap(self,event):
 		#グラップチェック
 		if self.mouseGrip[0] == 0:
 			self.mouseGrip = 1,None
+		
 
 	def MouseRelease(self,event):
 		#リリース
@@ -160,6 +184,64 @@ class Application(tk.Frame):
 			self.mouseGrip = 0,None
 		elif self.mouseGrip[0] == 3:
 			if self.mouseGrip[1] != None:
+				if event.y > 0 and self.nodeArea.winfo_containing(event.x_root-1,event.y_root-1) == self.nodeArea:
+					#座標計算
+					x = self.master.winfo_pointerx() - self.master.winfo_rootx()
+					y = self.master.winfo_pointery() -self.master.winfo_rooty()
+
+					#NodeDataの生成
+					global nodeIdlate
+					fileName = os.path.splitext(os.path.basename(self.mouseGrip[1].cget("text")))[0]
+					node = NodeType(x=x,y=y,width=100,height=100,path = self.mouseGrip[1].cget("text"),name=fileName ,id=str(nodeIdlate))
+					nodeIdlate+=1
+
+					#Nodeの生成
+					scriptTree.expect(">>>")
+					scriptTree.sendline("run "+node.path+" -name "+node.id)
+
+					scriptTree.expect("\n")
+					scriptTree.expect("\n")
+					
+					if scriptTree.before.decode(encoding='utf-8').split(" ")[2] != 'success\r':
+						print("run node failed")
+					else:
+						scriptTree.expect(">>>")
+						scriptTree.sendline("list")
+
+						pipeList = list()
+						scriptTree.expect("\n")
+						line = scriptTree.before.decode(encoding='utf-8')
+						while not '--------------------------------------------------------' in line:
+							scriptTree.expect("\n")
+							line = scriptTree.before.decode(encoding='utf-8')
+							if "name: "+node.id+"\r" in line:
+								scriptTree.expect("\n")
+								scriptTree.expect("\n")
+								scriptTree.expect("\n")
+								line = scriptTree.before.decode(encoding='utf-8')
+								while not '------------------------------------------' in line:
+									pipeName = line[:-1].split(":")[1]
+									scriptTree.expect("\n")
+									line = scriptTree.before.decode(encoding='utf-8')
+									pipeType = line[:-1].split(":")[1]
+									scriptTree.expect("\n")
+									line = scriptTree.before.decode(encoding='utf-8')
+									pipeUnit = line[:-1].split(":")[1]
+									scriptTree.expect("\n")
+									line = scriptTree.before.decode(encoding='utf-8')
+									pipeLength = line[:-1].split(":")[1]
+									scriptTree.expect("\n")
+									scriptTree.expect("\n")
+									if pipeType == 'IN':
+										scriptTree.expect("\n")
+									line = scriptTree.before.decode(encoding='utf-8')
+									pipeList.append((pipeName,pipeType,pipeUnit,pipeLength))
+
+						
+						self.paintNodes.append((node,pipeList))
+
+
+								
 				self.mouseGrip[1].destroy()
 			self.mouseGrip = 0,None
 		else:
@@ -168,23 +250,31 @@ class Application(tk.Frame):
 	def MouseMotion(self,event):
 		if self.mouseGrip[0] == 3:
 			if self.mouseGrip[1] == None:
-				self.mouseGrip = 3,tk.Label(self.master, text=self.nodeList.get(self.nodeList.curselection()[0]))
+				self.mouseGrip = 3,(tk.Label(self.master, text=self.mouseGrip[2]))
 			
 			# 座標計算
 			x = self.master.winfo_pointerx() - self.master.winfo_rootx()
 			y = self.master.winfo_pointery() -self.master.winfo_rooty()
 
 			self.mouseGrip[1].place(x=x, y=y)
+		elif self.mouseGrip[0] == 4 and event.y > 0 and self.nodeArea.winfo_containing(event.x_root-1,event.y_root-1) == self.nodeArea:
+			#座標計算
+			x = self.master.winfo_pointerx() - self.master.winfo_rootx()
+			y = self.master.winfo_pointery() -self.master.winfo_rooty()
+			#反映
+			self.paintNodes[self.mouseGrip[1][0]][0].x = x - self.mouseGrip[1][1]
+			self.paintNodes[self.mouseGrip[1][0]][0].y = y - self.mouseGrip[1][2]
 
 	
 	def nodeListSelectHandller(self,event):
 		#get index
 		selectIndex = self.nodeList.curselection()[0]
 
-		isFile = True
+		filePath = None
 		if selectIndex >= len(nodeFileList):
 			iter = len(nodeFileList)
-
+			isFile = True
+			folderName = nodeFolderList[0][0]
 			for folder in nodeFolderList:
 				#if folder name select
 				if iter == selectIndex:
@@ -207,21 +297,36 @@ class Application(tk.Frame):
 							self.nodeList.insert(iter,"    " + file)
 
 					break
+				elif iter > selectIndex:
+					break
 
 				#inclement
 				if folder[0] in self.opendFolder:
+					folderName = folder[0]
 					iter += len(folder)
 				else:
 					iter += 1
+				
+			if isFile:
+				filePath = folderName + "/" + self.nodeList.get(selectIndex)[4:]
+		else:
+			filePath = nodeFileList[selectIndex]
 
 		#グラップチェック
-		if self.mouseGrip[0] == 0 and isFile:
-			self.mouseGrip = 3,None
+		if self.mouseGrip[0] == 0 and filePath != None:
+			self.mouseGrip = 3,None ,filePath
 					
 
 	#####################################################################
 
 	###############################Func##################################
+
+	def nodeAreaDraw(self):
+		self.nodeArea.delete("all")
+		for (node,pipes) in self.paintNodes:
+			self.nodeArea.create_rectangle(node.x,node.y,node.x+node.width,node.y+node.height,fill="gray")
+			self.nodeArea.create_text(node.x+ node.width/2,node.y-8,text=node.name)
+		self.master.after(20,self.nodeAreaDraw)
 
 	def resizeChildWeight(self):
 		#エラー回避
