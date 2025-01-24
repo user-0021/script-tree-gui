@@ -7,6 +7,26 @@ from tkinter import ttk
 import tkinter.filedialog
 import pexpect
 from dataclasses import dataclass
+from enum import Enum
+
+@dataclass	
+class NodeType:
+	path : str
+	name : str
+	id : str
+	width : int
+	height : int
+	x : int
+	y : int
+
+class GrabType(Enum):
+	No = 0
+	Dummy = 1
+	Flame = 2
+	List = 3
+	Node = 4
+	NodeArea = 5
+	NodeArrow = 6
 
 #GLOBAL
 workSpace = os.environ['HOME'] + '/scriptTreeWorkSpace'
@@ -75,15 +95,6 @@ def scanFolder(folder):
 
 	return fList
 
-@dataclass	
-class NodeType:
-	path : str
-	name : str
-	id : str
-	width : int
-	height : int
-	x : int
-	y : int
 
 class Application(tk.Frame):
 	def __init__(self, master=None):
@@ -91,9 +102,11 @@ class Application(tk.Frame):
 
 		#各種変数の生成
 		self.nodeAreaRatio = 0.7
-		self.mouseGrip = 0,None
+		self.mouseGrip = GrabType.No,None
 		self.opendFolder = list()
 		self.paintNodes = list()
+		self.connectList = list()
+		self.focusedArrow = None
 
 		#ウィンドウの生成
 		self.master.title("scriptTreeGUI")
@@ -127,6 +140,7 @@ class Application(tk.Frame):
 		self.nodeArea = tk.Canvas(self.mainFlame, relief='groove', background="white")
 		self.nodeArea.pack(side='left', fill="both", expand=True)
 		self.nodeArea.bind("<Button-1>",self.NodeGrap)
+		self.master.bind("<KeyPress>",self.nodeDeleateHandler)
 
 		#Notebook生成
 		self.subWindow= ttk.Notebook(self.subFlame)
@@ -152,37 +166,113 @@ class Application(tk.Frame):
 
 	def flameBorderGrap(self,event):
 		#グラップチェック
-		if self.mouseGrip[0] == 0:
-			self.mouseGrip = 2,"flameBorder"
+		if self.mouseGrip[0] == GrabType.No:
+			self.mouseGrip = GrabType.Flame,"flameBorder"
+	
+	def nodeDeleateHandler(self,event):
+		if event.keysym == 'Delete':
+			if self.focusedArrow != None:
+				#deleate connect
+
+				#find target
+				deleateIndexList = list()
+				for i in range(len(self.connectList)):
+					((leftPipe,leftPos),(rightPipe,rightPos)) = self.connectList[i]
+
+					if leftPipe == self.focusedArrow or rightPipe == self.focusedArrow:
+						deleateIndexList.append(i - len(deleateIndexList))
+
+				#deleate
+				for i in deleateIndexList:
+					self.connectList.pop(i)
 
 	def flameBorderMotion(self,event):
-		if self.mouseGrip[0] == 2 and isInWidget(event.x_root,event.y_root,self.master):
+		if self.mouseGrip[0] == GrabType.Flame and isInWidget(event.x_root,event.y_root,self.master):
 			self.nodeAreaRatio = (event.x_root - self.master.winfo_x()) / self.master.winfo_width() 
 			self.resizeChildWeight()
 
 	def NodeGrap(self,event):
 		#グラップチェック
-		if self.mouseGrip[0] == 0:
-			self.mouseGrip = 1,None
+		if self.mouseGrip[0] == GrabType.No:
+
+			if self.focusedArrow != None:
+				self.mouseGrip = GrabType.NodeArrow,self.focusedArrow
+				return
+
+			#座標計算
 			x = self.master.winfo_pointerx() - self.master.winfo_rootx()
 			y = self.master.winfo_pointery() -self.master.winfo_rooty()
+
+			self.mouseGrip = GrabType.NodeArea,(x,y)
+
 			for (index,(node,pipes)) in enumerate(reversed(self.paintNodes)):
-				if x > node.x and y > node.y and x < (x + node.width) and y < (y + node.height):
+				if x > node.x and y > node.y and x < (node.x + node.width) and y < (node.y + node.height):
 					self.paintNodes[len(self.paintNodes) - index - 1],self.paintNodes[-1] = self.paintNodes[-1],self.paintNodes[len(self.paintNodes) - index - 1]
-					self.mouseGrip = 4,(-1,x - node.x,y - node.y)
-					break
+					self.mouseGrip = GrabType.Node,(-1,x - node.x,y - node.y)
+					return
 
 	def MouseGrap(self,event):
 		#グラップチェック
-		if self.mouseGrip[0] == 0:
-			self.mouseGrip = 1,None
+		if self.mouseGrip[0] == GrabType.No:
+			self.mouseGrip = GrabType.Dummy,None
 		
 
 	def MouseRelease(self,event):
 		#リリース
-		if self.mouseGrip[0] == 2:
-			self.mouseGrip = 0,None
-		elif self.mouseGrip[0] == 3:
+		if self.mouseGrip[0] == GrabType.NodeArrow:
+			if self.focusedArrow != None:
+
+				for  ((leftPipe,leftPos),(rightPipe,rightPos)) in self.connectList:
+					if leftPipe == self.focusedArrow and rightPipe == self.mouseGrip[1]:
+						self.mouseGrip = GrabType.No,None
+						return
+					if rightPipe == self.focusedArrow and leftPipe == self.mouseGrip[1]:
+						self.mouseGrip = GrabType.No,None
+						return
+					
+				leftPipe = None
+				rightPipe = None
+				
+				for (node,pipes) in self.paintNodes:
+					if node.id == self.mouseGrip[1][0]:
+						inputCount = 0
+						outputCount = 0
+
+						for pipe in pipes:							
+							if pipe[1] == 'OUT':
+								if pipe[0] == self.mouseGrip[1][1]:
+									leftPipe = (pipe,(node.x + node.width +7,(node.y+8) + outputCount * 16))
+								outputCount += 1
+							else:
+								if pipe[0] == self.mouseGrip[1][1]:
+									leftPipe = (pipe,(node.x,(node.y+8) + inputCount * 16))
+								inputCount += 1
+
+					if node.id == self.focusedArrow[0]:
+						inputCount = 0
+						outputCount = 0
+
+						for pipe in pipes:							
+							if pipe[1] == 'OUT':
+								if pipe[0] == self.focusedArrow[1]:
+									rightPipe = (pipe,(node.x + node.width +7,(node.y+8) + outputCount * 16))
+								outputCount += 1
+							else:
+								if pipe[0] == self.focusedArrow[1]:
+									rightPipe = (pipe,(node.x,(node.y+8) + inputCount * 16))
+								inputCount += 1
+
+				if leftPipe[0][2] == rightPipe[0][2] and leftPipe[0][3] == rightPipe[0][3] and leftPipe[0][1] != rightPipe[0][1] and leftPipe[0][1] != 'CONST' and rightPipe[0][1] != 'CONST':
+					if leftPipe[0][1] != 'IN':
+						self.connectList.append((((self.focusedArrow[0],rightPipe[0][0]),rightPipe[1]),((self.mouseGrip[1][0],leftPipe[0][0]),leftPipe[1])))
+					else:
+						self.connectList.append((((self.mouseGrip[1][0],leftPipe[0][0]),leftPipe[1]),((self.focusedArrow[0],rightPipe[0][0]),rightPipe[1])))
+					
+				else:
+					print("pipe is Invalid")
+					print("Must be IN and OUT with the same data type and same array length")
+
+		elif self.mouseGrip[0] == GrabType.List:
 			if self.mouseGrip[1] != None:
 				if event.y > 0 and self.nodeArea.winfo_containing(event.x_root-1,event.y_root-1) == self.nodeArea:
 					#座標計算
@@ -252,27 +342,83 @@ class Application(tk.Frame):
 
 								
 				self.mouseGrip[1].destroy()
-			self.mouseGrip = 0,None
-		else:
-			self.mouseGrip = 0,None
+			
+		self.mouseGrip = GrabType.No,None
 	
 	def MouseMotion(self,event):
-		if self.mouseGrip[0] == 3:
+		if self.mouseGrip[0] == GrabType.List:
 			if self.mouseGrip[1] == None:
-				self.mouseGrip = 3,(tk.Label(self.master, text=self.mouseGrip[2]))
+				self.mouseGrip = GrabType.List,(tk.Label(self.master, text=self.mouseGrip[2]))
 			
 			# 座標計算
 			x = self.master.winfo_pointerx() - self.master.winfo_rootx()
 			y = self.master.winfo_pointery() -self.master.winfo_rooty()
 
 			self.mouseGrip[1].place(x=x, y=y)
-		elif self.mouseGrip[0] == 4 and event.y > 0 and self.nodeArea.winfo_containing(event.x_root-1,event.y_root-1) == self.nodeArea:
+		elif event.y > 0 and self.nodeArea.winfo_containing(event.x_root-1,event.y_root-1) == self.nodeArea:
 			#座標計算
 			x = self.master.winfo_pointerx() - self.master.winfo_rootx()
 			y = self.master.winfo_pointery() -self.master.winfo_rooty()
-			#反映
-			self.paintNodes[self.mouseGrip[1][0]][0].x = x - self.mouseGrip[1][1]
-			self.paintNodes[self.mouseGrip[1][0]][0].y = y - self.mouseGrip[1][2]
+			
+			if self.mouseGrip[0] == GrabType.Node:
+				moveX = x - self.mouseGrip[1][1] - self.paintNodes[self.mouseGrip[1][0]][0].x 
+				moveY = y - self.mouseGrip[1][2] - self.paintNodes[self.mouseGrip[1][0]][0].y
+
+				for i in range(len(self.connectList)):
+					((leftPipe,leftPos),(rightPipe,rightPos)) = self.connectList[i]
+					if self.paintNodes[self.mouseGrip[1][0]][0].id == leftPipe[0]:
+						leftPos = (leftPos[0] + moveX, leftPos[1] + moveY)
+						self.connectList[i] = ((leftPipe,leftPos),(rightPipe,rightPos))
+					if self.paintNodes[self.mouseGrip[1][0]][0].id == rightPipe[0]:
+						rightPos = (rightPos[0] + moveX, rightPos[1] + moveY)
+						self.connectList[i] = ((leftPipe,leftPos),(rightPipe,rightPos))
+
+				#反映
+				self.paintNodes[self.mouseGrip[1][0]][0].x += moveX
+				self.paintNodes[self.mouseGrip[1][0]][0].y += moveY
+			elif self.mouseGrip[0] == GrabType.NodeArea:
+
+				moveX = x -self.mouseGrip[1][0]
+				moveY = y -self.mouseGrip[1][1]
+
+				for i in range(len(self.paintNodes)):
+					self.paintNodes[i][0].x += moveX
+					self.paintNodes[i][0].y += moveY
+				
+				for i in range(len(self.connectList)):
+					((leftPipe,leftPos),(rightPipe,rightPos)) = self.connectList[i]
+					leftPos = (leftPos[0] + moveX, leftPos[1] + moveY)
+					rightPos = (rightPos[0] + moveX, rightPos[1] + moveY)
+					self.connectList[i] = ((leftPipe,leftPos),(rightPipe,rightPos))
+
+				self.mouseGrip = GrabType.NodeArea,(x,y)
+			else:
+				#矢印を光らせる
+				self.focusedArrow = None
+				for (node,pipes) in self.paintNodes:
+					#矢印の範囲かチェック
+					if node.y < y and (node.y+node.height) > y:
+
+						if (node.x - 10) < x  and node.x > x:#IN側矢印
+							inCount = int((y - node.y) / 16)
+							for (pipeName,pipeType,pipeUnit,pipeLength) in pipes:
+								if pipeType != 'OUT':
+									if inCount == 0:
+										self.focusedArrow = (node.id,pipeName)
+										break
+									else:
+										inCount-=1
+
+						elif (node.x + node.width) < x  and (node.x + node.width + 10) > x:#OUT側矢印
+							outCount = int((y - node.y) / 16)
+							for (pipeName,pipeType,pipeUnit,pipeLength) in pipes:
+								if pipeType == 'OUT':
+									if outCount == 0:
+										self.focusedArrow = (node.id,pipeName)
+										break
+									else:
+										outCount-=1
+
 
 	
 	def nodeListSelectHandller(self,event):
@@ -322,8 +468,8 @@ class Application(tk.Frame):
 			filePath = nodeFileList[selectIndex]
 
 		#グラップチェック
-		if self.mouseGrip[0] == 0 and filePath != None:
-			self.mouseGrip = 3,None ,filePath
+		if self.mouseGrip[0] == GrabType.No and filePath != None:
+			self.mouseGrip = GrabType.List,None ,filePath
 					
 
 	#####################################################################
@@ -338,15 +484,39 @@ class Application(tk.Frame):
 			inputCount = 0
 			outputCount = 0
 			for (pipeName,pipeType,pipeUnit,pipeLength) in pipes:
+				c = 'black'
+				w = 2
+				if self.focusedArrow != None and node.id == self.focusedArrow[0] and pipeName == self.focusedArrow[1]:
+					c = 'blue'
+					w = 3
+				
+				if self.mouseGrip[0] == GrabType.NodeArrow and node.id == self.mouseGrip[1][0] and pipeName == self.mouseGrip[1][1]:
+					#座標計算
+					x = self.master.winfo_pointerx() - self.master.winfo_rootx()
+					y = self.master.winfo_pointery() -self.master.winfo_rooty()
+
+					if pipeType == 'OUT':
+						self.nodeArea.create_line(node.x + node.width +7,(node.y+8) + outputCount * 16,x,y,width=w,fill = c)
+					else:
+						self.nodeArea.create_line(node.x,(node.y+8) + inputCount * 16,x,y,width=w,fill = c)
+
+
 				if pipeType == 'OUT':
-					self.nodeArea.create_text(node.x+ node.width,(node.y+8) + outputCount * 16 ,text=pipeName)
+					self.nodeArea.create_text(node.x+ node.width - 3,(node.y+8) + outputCount * 16 ,text=pipeName,anchor='e')
+					self.nodeArea.create_line(node.x+ node.width,(node.y+8) + outputCount * 16 - 6,node.x+node.width+7,(node.y+8) + outputCount * 16,width=w,fill = c)
+					self.nodeArea.create_line(node.x+ node.width,(node.y+8) + outputCount * 16 + 6,node.x+node.width+7,(node.y+8) + outputCount * 16 ,width=w,fill = c)
 					outputCount += 1
 				else:
-					self.nodeArea.create_text(node.x,(node.y+8) + inputCount * 16 ,text=pipeName)
+					self.nodeArea.create_text(node.x + 3,(node.y+8) + inputCount * 16 ,text=pipeName,anchor='w')
+					self.nodeArea.create_line(node.x - 7,(node.y+8) + inputCount * 16 - 6,node.x-1,(node.y+8) + inputCount * 16,width=w,fill = c)
+					self.nodeArea.create_line(node.x - 7,(node.y+8) + inputCount * 16 + 6,node.x-1,(node.y+8) + inputCount * 16 ,width=w,fill = c)
 					inputCount += 1
 
-	
+		for ((leftPipe,leftPos),(rightPipe,rightPos)) in self.connectList:
+			self.nodeArea.create_line(leftPos[0],leftPos[1],rightPos[0],rightPos[1])
+
 		self.master.after(20,self.nodeAreaDraw)
+	
 
 	def resizeChildWeight(self):
 		#エラー回避
