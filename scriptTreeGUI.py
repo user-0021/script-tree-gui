@@ -5,6 +5,7 @@ import signal as sig
 import tkinter as tk
 from tkinter import ttk
 import tkinter.filedialog
+import tkinter.simpledialog as simpledialog
 import pexpect
 from dataclasses import dataclass
 from enum import Enum
@@ -28,6 +29,11 @@ class GrabType(Enum):
 	NodeArea = 5
 	NodeArrow = 6
 
+class FoucusObj(Enum):
+	No = 0
+	NodeArrow = 1
+	Node = 2
+
 #GLOBAL
 workSpace = os.environ['HOME'] + '/scriptTreeWorkSpace'
 configFilePath = os.environ['HOME'] + '/scriptTreeWorkSpace/.conf'
@@ -38,6 +44,7 @@ scriptTree = None
 nodeFileList = list()
 nodeFolderList = list()
 nodeIdlate = 0
+scriptTreeTimerValue = 1000
 
 #callback
 def sigintHandle(signum, r):
@@ -106,11 +113,13 @@ class Application(tk.Frame):
 		self.opendFolder = list()
 		self.paintNodes = list()
 		self.connectList = list()
-		self.focusedArrow = None
+		self.underCursor = None
+		self.focuseObject = FoucusObj.No,None
+		self.displayNode = None
 
 		#ウィンドウの生成
 		self.master.title("scriptTreeGUI")
-		self.master.geometry("400x300")	
+		self.master.geometry("1280x720")	
 		self.master.bind("<Configure>", self.resizeWindowHandller)
 		self.master.bind("<Button-1>",self.MouseGrap)
 		self.master.bind("<ButtonRelease-1>",self.MouseRelease)
@@ -119,10 +128,16 @@ class Application(tk.Frame):
 		#メニューの作成
 		self.menubar = tk.Menu(self.master)
 		self.master.config(menu=self.menubar)
-		filemenu = tk.Menu(self.menubar, tearoff=0)
-		filemenu.add_command(label="Open Node File", command=self.openNodeFile)
-		filemenu.add_command(label="Open Node Folder", command=self.openNodeFolder)
-		self.menubar.add_cascade(label="File",menu=filemenu)
+		fileMenu = tk.Menu(self.menubar, tearoff=0)
+		fileMenu.add_command(label="Open Node File", command=self.openNodeFile)
+		fileMenu.add_command(label="Open Node Folder", command=self.openNodeFolder)
+		self.menubar.add_cascade(label="File",menu=fileMenu)
+		self.menubar.add_separator()
+		timerMenu = tk.Menu(self.menubar, tearoff=0)
+		timerMenu.add_command(label="Timer Run", command=self.nodeSystemTimerRun)
+		timerMenu.add_command(label="Timer Stop", command=self.nodeSystemTimerStop)
+		timerMenu.add_command(label="Timer Set", command=self.nodeSystemTimerSet)
+		self.menubar.add_cascade(label="Timer",menu=timerMenu)
 		self.menubar.add_separator()
 
 		#フレームを生成
@@ -139,12 +154,12 @@ class Application(tk.Frame):
 		#Canvas生成
 		self.nodeArea = tk.Canvas(self.mainFlame, relief='groove', background="white")
 		self.nodeArea.pack(side='left', fill="both", expand=True)
-		self.nodeArea.bind("<Button-1>",self.NodeGrap)
 		self.master.bind("<KeyPress>",self.nodeDeleateHandler)
 
 		#Notebook生成
 		self.subWindow= ttk.Notebook(self.subFlame)
 		self.subWindow.pack(side='left', fill="both", expand=True)
+		# lib
 		self.library = tk.Frame(self.subWindow)
 		self.subWindow.add(self.library, text=' library ')
 		self.nodeList = tk.Listbox(self.library, selectmode="single", height=6)
@@ -154,12 +169,69 @@ class Application(tk.Frame):
 		self.nodeList['yscrollcommand'] = scrollbar.set
 		scrollbar.pack(side='right',fill="y")
 		self.nodeList.pack(side='left', fill="both", expand=True)
+		# info
 		self.info = tk.Frame(self.subWindow)
+		self.info_nodeName = tk.Label(self.info,text="",background='white',relief='solid')
+		self.info_nodeName.place(relx = 0.05,y = 20,relwidth= 0.9)
+		self.info_nodeId = tk.Label(self.info,text="id:1")
+		self.info_nodeId.place(relx = 0.95,y = 56,anchor='e')
 		self.subWindow.add(self.info, text=' info ')
 
 		self.master.after(20,self.nodeAreaDraw)
 
 	############################CallBacks##############################
+
+	def nodeSystemTimerRun(self):
+		scriptTree.expect(">>>")
+		scriptTree.sendline("timer run")
+		scriptTree.expect("\n")
+		scriptTree.expect("\n")
+		
+	def nodeSystemTimerStop(self):
+		scriptTree.expect(">>>")
+		scriptTree.sendline("timer stop")
+		scriptTree.expect("\n")
+		scriptTree.expect("\n")
+
+	def nodeSystemTimerSet(self):
+		global scriptTreeTimerValue
+		scriptTreeTimerValue = simpledialog.askfloat("Input Box", "Wakeup timer period[ms]",initialvalue=float(scriptTreeTimerValue))
+		
+		if scriptTreeTimerValue != None:
+			scriptTree.expect(">>>")
+			scriptTree.sendline("timer set " + str(scriptTreeTimerValue))
+			scriptTree.expect("\n")
+			scriptTree.expect("\n")
+
+		
+	def openNodeFile(self):
+		fileName = openFile("nodeファイル","*.node")
+		if len(fileName) != 0:
+			isInclude = False
+			for e in nodeFileList:
+				if e[0] == fileName:
+					isInclude = True
+					break
+
+			if not isInclude:
+				files = list()
+				files.append(fileName)
+				self.insertFile(files)
+	
+	def openNodeFolder(self):
+		folderNmae = openFolder()
+		if len(folderNmae) != 0:
+			isInclude = False
+			for e in nodeFolderList:
+				if e[0] == folderNmae:
+					isInclude = True
+					break
+
+			if not isInclude:
+				folderList = list()
+				folderList.append(folderNmae)
+				folderList += scanFolder(folderNmae)
+				self.insertFolder(folderList)
 
 	def resizeWindowHandller(self,event):
 		self.resizeChildWeight()
@@ -171,7 +243,7 @@ class Application(tk.Frame):
 	
 	def nodeDeleateHandler(self,event):
 		if event.keysym == 'Delete':
-			if self.focusedArrow != None:
+			if self.focuseObject[0] == FoucusObj.NodeArrow:
 				#deleate connect
 
 				#find target
@@ -179,39 +251,76 @@ class Application(tk.Frame):
 				for i in range(len(self.connectList)):
 					((leftPipe,leftPos),(rightPipe,rightPos)) = self.connectList[i]
 
-					if leftPipe == self.focusedArrow or rightPipe == self.focusedArrow:
+					if leftPipe == self.focuseObject[1] or rightPipe == self.focuseObject[1]:
 						deleateIndexList.append(i - len(deleateIndexList))
 
 				#deleate
 				for i in deleateIndexList:
+					((leftPipe,leftPos),(rightPipe,rightPos)) = self.connectList[i]
+					scriptTree.expect(">>>")
+					scriptTree.sendline("disconnect "+leftPipe[0]+' '+leftPipe[1])
 					self.connectList.pop(i)
+			elif self.focuseObject[0] == FoucusObj.Node:
+				#パイプ探査
+				deleateIndexList = list()
+				for i in range(len(self.connectList)):
+					((leftPipe,leftPos),(rightPipe,rightPos)) = self.connectList[i]
+
+					if leftPipe[0] == self.focuseObject[1] or rightPipe[0] == self.focuseObject[1]:
+						deleateIndexList.append(i - len(deleateIndexList))
+				
+				#パイプ削除
+				for i in deleateIndexList:
+					((leftPipe,leftPos),(rightPipe,rightPos)) = self.connectList[i]
+					self.connectList.pop(i)
+
+				#ノード削除
+
+				scriptTree.expect(">>>")
+				scriptTree.sendline("kill "+self.focuseObject[1])
+
+				deleateIndex = -1
+				for index,(node,pipes) in enumerate(self.paintNodes):
+					if node.id == self.focuseObject[1]:
+						deleateIndex = index
+
+				if deleateIndex != -1:
+					self.paintNodes.pop(deleateIndex)
+				self.mouseGrip = GrabType.No,None
+				self.focuseObject = FoucusObj.No,None
 
 	def flameBorderMotion(self,event):
 		if self.mouseGrip[0] == GrabType.Flame and isInWidget(event.x_root,event.y_root,self.master):
 			self.nodeAreaRatio = (event.x_root - self.master.winfo_x()) / self.master.winfo_width() 
 			self.resizeChildWeight()
 
-	def NodeGrap(self,event):
-		#グラップチェック
-		if self.mouseGrip[0] == GrabType.No:
+	def MouseGrap(self,event):
+		self.focuseObject = FoucusObj.No,None
 
-			if self.focusedArrow != None:
-				self.mouseGrip = GrabType.NodeArrow,self.focusedArrow
-				return
+		#NodeArea
+		if event.y > 0 and self.nodeArea.winfo_containing(event.x_root-1,event.y_root-1) == self.nodeArea:
+			#グラップチェック
+			if self.mouseGrip[0] == GrabType.No:
 
-			#座標計算
-			x = self.master.winfo_pointerx() - self.master.winfo_rootx()
-			y = self.master.winfo_pointery() -self.master.winfo_rooty()
-
-			self.mouseGrip = GrabType.NodeArea,(x,y)
-
-			for (index,(node,pipes)) in enumerate(reversed(self.paintNodes)):
-				if x > node.x and y > node.y and x < (node.x + node.width) and y < (node.y + node.height):
-					self.paintNodes[len(self.paintNodes) - index - 1],self.paintNodes[-1] = self.paintNodes[-1],self.paintNodes[len(self.paintNodes) - index - 1]
-					self.mouseGrip = GrabType.Node,(-1,x - node.x,y - node.y)
+				if self.underCursor != None:
+					self.focuseObject = FoucusObj.NodeArrow,self.underCursor
+					self.mouseGrip = GrabType.NodeArrow,self.underCursor
 					return
 
-	def MouseGrap(self,event):
+				#座標計算
+				x = self.master.winfo_pointerx() - self.master.winfo_rootx()
+				y = self.master.winfo_pointery() -self.master.winfo_rooty()
+
+				self.mouseGrip = GrabType.NodeArea,(x,y)
+
+				for (index,(node,pipes)) in enumerate(reversed(self.paintNodes)):
+					if x > node.x and y > node.y and x < (node.x + node.width) and y < (node.y + node.height):
+						self.paintNodes[len(self.paintNodes) - index - 1],self.paintNodes[-1] = self.paintNodes[-1],self.paintNodes[len(self.paintNodes) - index - 1]
+						self.displayNode = (node,pipes)
+						self.focuseObject = FoucusObj.Node,node.id
+						self.mouseGrip = GrabType.Node,(-1,x - node.x,y - node.y)
+						return
+
 		#グラップチェック
 		if self.mouseGrip[0] == GrabType.No:
 			self.mouseGrip = GrabType.Dummy,None
@@ -220,13 +329,17 @@ class Application(tk.Frame):
 	def MouseRelease(self,event):
 		#リリース
 		if self.mouseGrip[0] == GrabType.NodeArrow:
-			if self.focusedArrow != None:
+			if self.underCursor != None:
 
+				#すでに接続済みor自己接続
+				if self.mouseGrip[1] == self.underCursor:
+					self.mouseGrip = GrabType.No,None
+					return
 				for  ((leftPipe,leftPos),(rightPipe,rightPos)) in self.connectList:
-					if leftPipe == self.focusedArrow and rightPipe == self.mouseGrip[1]:
+					if leftPipe == self.underCursor and rightPipe == self.mouseGrip[1]:
 						self.mouseGrip = GrabType.No,None
 						return
-					if rightPipe == self.focusedArrow and leftPipe == self.mouseGrip[1]:
+					if rightPipe == self.underCursor and leftPipe == self.mouseGrip[1]:
 						self.mouseGrip = GrabType.No,None
 						return
 					
@@ -248,25 +361,29 @@ class Application(tk.Frame):
 									leftPipe = (pipe,(node.x,(node.y+8) + inputCount * 16))
 								inputCount += 1
 
-					if node.id == self.focusedArrow[0]:
+					if node.id == self.underCursor[0]:
 						inputCount = 0
 						outputCount = 0
 
 						for pipe in pipes:							
 							if pipe[1] == 'OUT':
-								if pipe[0] == self.focusedArrow[1]:
+								if pipe[0] == self.underCursor[1]:
 									rightPipe = (pipe,(node.x + node.width +7,(node.y+8) + outputCount * 16))
 								outputCount += 1
 							else:
-								if pipe[0] == self.focusedArrow[1]:
+								if pipe[0] == self.underCursor[1]:
 									rightPipe = (pipe,(node.x,(node.y+8) + inputCount * 16))
 								inputCount += 1
 
 				if leftPipe[0][2] == rightPipe[0][2] and leftPipe[0][3] == rightPipe[0][3] and leftPipe[0][1] != rightPipe[0][1] and leftPipe[0][1] != 'CONST' and rightPipe[0][1] != 'CONST':
+					scriptTree.expect(">>>")
 					if leftPipe[0][1] != 'IN':
-						self.connectList.append((((self.focusedArrow[0],rightPipe[0][0]),rightPipe[1]),((self.mouseGrip[1][0],leftPipe[0][0]),leftPipe[1])))
+						self.connectList.append((((self.underCursor[0],rightPipe[0][0]),rightPipe[1]),((self.mouseGrip[1][0],leftPipe[0][0]),leftPipe[1])))
+						scriptTree.sendline("connect "+self.underCursor[0]+' '+rightPipe[0][0]+' '+self.mouseGrip[1][0]+' '+leftPipe[0][0])
 					else:
-						self.connectList.append((((self.mouseGrip[1][0],leftPipe[0][0]),leftPipe[1]),((self.focusedArrow[0],rightPipe[0][0]),rightPipe[1])))
+						self.connectList.append((((self.mouseGrip[1][0],leftPipe[0][0]),leftPipe[1]),((self.underCursor[0],rightPipe[0][0]),rightPipe[1])))
+						scriptTree.sendline("connect "+self.mouseGrip[1][0]+' '+leftPipe[0][0]+' '+self.underCursor[0]+' '+rightPipe[0][0])
+					
 					
 				else:
 					print("pipe is Invalid")
@@ -394,7 +511,7 @@ class Application(tk.Frame):
 				self.mouseGrip = GrabType.NodeArea,(x,y)
 			else:
 				#矢印を光らせる
-				self.focusedArrow = None
+				self.underCursor = None
 				for (node,pipes) in self.paintNodes:
 					#矢印の範囲かチェック
 					if node.y < y and (node.y+node.height) > y:
@@ -404,7 +521,7 @@ class Application(tk.Frame):
 							for (pipeName,pipeType,pipeUnit,pipeLength) in pipes:
 								if pipeType != 'OUT':
 									if inCount == 0:
-										self.focusedArrow = (node.id,pipeName)
+										self.underCursor = (node.id,pipeName)
 										break
 									else:
 										inCount-=1
@@ -414,7 +531,7 @@ class Application(tk.Frame):
 							for (pipeName,pipeType,pipeUnit,pipeLength) in pipes:
 								if pipeType == 'OUT':
 									if outCount == 0:
-										self.focusedArrow = (node.id,pipeName)
+										self.underCursor = (node.id,pipeName)
 										break
 									else:
 										outCount-=1
@@ -479,14 +596,18 @@ class Application(tk.Frame):
 	def nodeAreaDraw(self):
 		self.nodeArea.delete("all")
 		for (node,pipes) in self.paintNodes:
-			self.nodeArea.create_rectangle(node.x,node.y,node.x+node.width,node.y+node.height,fill="gray")
+			if self.focuseObject[0] == FoucusObj.Node and self.focuseObject[1] == node.id: 
+				self.nodeArea.create_rectangle(node.x,node.y,node.x+node.width,node.y+node.height,fill="deep sky blue",outline='blue',width=3)
+			else:
+				self.nodeArea.create_rectangle(node.x,node.y,node.x+node.width,node.y+node.height,fill="gray",outline='black')
 			self.nodeArea.create_text(node.x+ node.width/2,node.y-8,text=node.name)
 			inputCount = 0
 			outputCount = 0
 			for (pipeName,pipeType,pipeUnit,pipeLength) in pipes:
 				c = 'black'
 				w = 2
-				if self.focusedArrow != None and node.id == self.focusedArrow[0] and pipeName == self.focusedArrow[1]:
+				if (self.underCursor != None and (node.id,pipeName) == self.underCursor) or \
+					(self.focuseObject[0] == FoucusObj.NodeArrow and (node.id,pipeName) == self.focuseObject[1]):
 					c = 'blue'
 					w = 3
 				
@@ -513,7 +634,7 @@ class Application(tk.Frame):
 					inputCount += 1
 
 		for ((leftPipe,leftPos),(rightPipe,rightPos)) in self.connectList:
-			self.nodeArea.create_line(leftPos[0],leftPos[1],rightPos[0],rightPos[1])
+			self.nodeArea.create_line(leftPos[0],leftPos[1],rightPos[0],rightPos[1],width=2)
 
 		self.master.after(20,self.nodeAreaDraw)
 	
@@ -526,34 +647,6 @@ class Application(tk.Frame):
 		self.nodeArea.configure(width=self.master.winfo_width() * self.nodeAreaRatio)
 		self.subFlame.configure(width=max(0.0,self.master.winfo_width() * (1.0 - self.nodeAreaRatio) - 7))
 	
-	def openNodeFile(self):
-		fileName = openFile("nodeファイル","*.node")
-		if len(fileName) != 0:
-			isInclude = False
-			for e in nodeFileList:
-				if e[0] == fileName:
-					isInclude = True
-					break
-
-			if not isInclude:
-				files = list()
-				files.append(fileName)
-				self.insertFile(files)
-	
-	def openNodeFolder(self):
-		folderNmae = openFolder()
-		if len(folderNmae) != 0:
-			isInclude = False
-			for e in nodeFolderList:
-				if e[0] == folderNmae:
-					isInclude = True
-					break
-
-			if not isInclude:
-				folderList = list()
-				folderList.append(folderNmae)
-				folderList += scanFolder(folderNmae)
-				self.insertFolder(folderList)
 	
 	def initList(self):
 		for file in nodeFileList:
