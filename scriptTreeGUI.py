@@ -40,6 +40,7 @@ configFilePath = os.environ['HOME'] + '/scriptTreeWorkSpace/.conf'
 saveDirPath = os.environ['HOME'] + '/scriptTreeWorkSpace/data'
 fileListPath = os.environ['HOME'] + '/scriptTreeWorkSpace/data/fileList.txt'
 folderListPath = os.environ['HOME'] + '/scriptTreeWorkSpace/data/folderList.txt'
+logFolder = ''
 scriptTree = None
 nodeFileList = list()
 nodeFolderList = list()
@@ -101,6 +102,20 @@ def scanFolder(folder):
 				fList.append(fileName)
 
 	return fList
+
+def getLatestFolder(folder):
+	dirList = list()
+
+	for f in os.listdir(folder):
+		path = os.path.join(folder,f)
+		if os.path.isdir(path):
+			dirList.append(path)
+
+	if len(dirList) == 0:
+		return ''
+
+	dirList.sort(key=os.path.getmtime,reverse=True)
+	return dirList[0]
 
 
 class Application(tk.Frame):
@@ -194,10 +209,15 @@ class Application(tk.Frame):
 		self.info_constValue.place(relx=0.05,y = 320,relwidth=0.9)
 		self.info_logArea = ttk.Notebook(self.info)
 		self.info_logArea.place(relx=0.05,y = 360,relwidth=0.9,height=300)
-		self.info_debugLog = tk.Frame(self.info_logArea)
-		self.info_debugCsv = tk.Frame(self.info_logArea)
-		self.info_logArea.add(self.info_debugLog, text=' log ')
-		self.info_logArea.add(self.info_debugCsv, text=' graph ')
+		self.info_logPage = tk.Frame(self.info_logArea)
+		self.info_graphPage = tk.Frame(self.info_logArea)
+		self.info_logArea.add(self.info_logPage, text=' log ')
+		self.info_debugLog = tk.Text(self.info_logPage,state='disabled')
+		scrollbar = ttk.Scrollbar(self.info_logPage, orient='vertical', command=self.info_debugLog.yview)
+		self.info_debugLog['yscrollcommand'] = scrollbar.set
+		scrollbar.pack(side='right',fill="y")
+		self.info_debugLog.pack(side='left',fill='both',expand=True) 
+		self.info_logArea.add(self.info_graphPage, text=' graph ')
 		self.subWindow.add(self.info, text=' info ')
 
 		self.master.after(20,self.nodeAreaDraw)
@@ -777,12 +797,18 @@ if __name__ == "__main__" and pf.system() == "Linux":
 		scriptTree = pexpect.spawn('./scriptTree lunch')
 	else:
 		scriptTree = pexpect.spawn('scriptTree lunch')
+	scriptTree.expect("\n")
+	if scriptTree.before.decode(encoding='utf-8') != 'lunch success.\r':
+		print('Failed lunch scriptTree')
+		exit(1)
 
 	# load data
 	nodeFileList = loadFile(fileListPath)
 	nodeFolderList = loadFile(folderListPath)
 	for folder in nodeFolderList:
 		folder += scanFolder(folder[0])
+
+	logFolder = getLatestFolder(workSpace + '/Logs')
 
 	# lunch
 	root = tk.Tk()
