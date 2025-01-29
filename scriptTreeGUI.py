@@ -192,6 +192,12 @@ class Application(tk.Frame):
 		tk.Label(self.info,text="const value").place(relx = 0.05,y = 300,relwidth=0.90)
 		self.info_constValue = tk.Entry(self.info,state='disabled')
 		self.info_constValue.place(relx=0.05,y = 320,relwidth=0.9)
+		self.info_logArea = ttk.Notebook(self.info)
+		self.info_logArea.place(relx=0.05,y = 360,relwidth=0.9,height=300)
+		self.info_debugLog = tk.Frame(self.info_logArea)
+		self.info_debugCsv = tk.Frame(self.info_logArea)
+		self.info_logArea.add(self.info_debugLog, text=' log ')
+		self.info_logArea.add(self.info_debugCsv, text=' graph ')
 		self.subWindow.add(self.info, text=' info ')
 
 		self.master.after(20,self.nodeAreaDraw)
