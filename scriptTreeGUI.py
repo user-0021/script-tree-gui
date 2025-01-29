@@ -116,6 +116,7 @@ class Application(tk.Frame):
 		self.underCursor = None
 		self.focuseObject = FoucusObj.No,None
 		self.displayNode = None
+		self.editConst = None
 
 		#ウィンドウの生成
 		self.master.title("scriptTreeGUI")
@@ -171,10 +172,26 @@ class Application(tk.Frame):
 		self.nodeList.pack(side='left', fill="both", expand=True)
 		# info
 		self.info = tk.Frame(self.subWindow)
-		self.info_nodeName = tk.Label(self.info,text="",background='white',relief='solid')
+		self.info_nodeName = tk.Label(self.info,text="",background='white',relief='solid',anchor='w')
 		self.info_nodeName.place(relx = 0.05,y = 20,relwidth= 0.9)
 		self.info_nodeId = tk.Label(self.info,text="id:1")
 		self.info_nodeId.place(relx = 0.95,y = 56,anchor='e')
+		self.info_nodePipes = ttk.Treeview(self.info)
+		self.info_nodePipes['columns'] = ('Name','Type','Unit','Length')
+		self.info_nodePipes.column('#0',width=0, stretch='no')
+		self.info_nodePipes.column('Name',anchor='center',width=40)
+		self.info_nodePipes.column('Type',anchor='center',width=40)
+		self.info_nodePipes.column('Unit',anchor='center',width=40)
+		self.info_nodePipes.column('Length',anchor='center',width=40)
+		self.info_nodePipes.heading('Name',text='Name')
+		self.info_nodePipes.heading('Type',text='Type')
+		self.info_nodePipes.heading('Unit',text='Unit')
+		self.info_nodePipes.heading('Length',text='Length')
+		self.info_nodePipes.place(relx = 0.05,y = 70,relwidth=0.90,height=220)
+		self.info_nodePipes.bind("<<TreeviewSelect>>",self.pipeTreeSelected)
+		tk.Label(self.info,text="const value").place(relx = 0.05,y = 300,relwidth=0.90)
+		self.info_constValue = tk.Entry(self.info,state='disabled')
+		self.info_constValue.place(relx=0.05,y = 320,relwidth=0.9)
 		self.subWindow.add(self.info, text=' info ')
 
 		self.master.after(20,self.nodeAreaDraw)
@@ -288,6 +305,19 @@ class Application(tk.Frame):
 					self.paintNodes.pop(deleateIndex)
 				self.mouseGrip = GrabType.No,None
 				self.focuseObject = FoucusObj.No,None
+		elif event.keysym == 'Return':
+			if self.info_constValue.focus_get() == self.info_constValue:
+				self.info_nodePipes.focus_set()
+				scriptTree.expect(">>>")
+				scriptTree.sendline('const set '+self.displayNode[0].id+' '+self.editConst[0]+' '+self.info_constValue.get().replace(',',' '))
+				scriptTree.expect("\n")
+				scriptTree.expect("\n")
+
+				if scriptTree.before.decode(encoding='utf-8').split(' ')[2] != 'success\r':
+					self.updateInfo()
+
+			
+				
 
 	def flameBorderMotion(self,event):
 		if self.mouseGrip[0] == GrabType.Flame and isInWidget(event.x_root,event.y_root,self.master):
@@ -316,9 +346,11 @@ class Application(tk.Frame):
 				for (index,(node,pipes)) in enumerate(reversed(self.paintNodes)):
 					if x > node.x and y > node.y and x < (node.x + node.width) and y < (node.y + node.height):
 						self.paintNodes[len(self.paintNodes) - index - 1],self.paintNodes[-1] = self.paintNodes[-1],self.paintNodes[len(self.paintNodes) - index - 1]
-						self.displayNode = (node,pipes)
 						self.focuseObject = FoucusObj.Node,node.id
 						self.mouseGrip = GrabType.Node,(-1,x - node.x,y - node.y)
+						self.displayNode = (node,pipes)
+						self.updateInfo()
+
 						return
 
 		#グラップチェック
@@ -540,7 +572,11 @@ class Application(tk.Frame):
 	
 	def nodeListSelectHandller(self,event):
 		#get index
-		selectIndex = self.nodeList.curselection()[0]
+		selection = self.nodeList.curselection()
+		if selection == ():
+			return
+
+		selectIndex = selection[0]
 
 		filePath = None
 		if selectIndex >= len(nodeFileList):
@@ -588,6 +624,43 @@ class Application(tk.Frame):
 		if self.mouseGrip[0] == GrabType.No and filePath != None:
 			self.mouseGrip = GrabType.List,None ,filePath
 					
+	def pipeTreeSelected(self,event):
+		id = self.info_nodePipes.focus()
+		
+		if id != '':
+			pipeType = self.info_nodePipes.item(id,'values')
+			if pipeType[1] == 'CONST':
+				
+				#store
+				self.editConst = pipeType
+
+				#get value
+				scriptTree.expect(">>>")
+				scriptTree.sendline('const get '+self.displayNode[0].id+' '+pipeType[0])
+				scriptTree.expect("\n")
+				scriptTree.expect("\n")
+				
+				arrayStr = ''
+
+				#parse
+				if scriptTree.before.decode(encoding='utf-8').split(' ')[2] == 'success:\r':
+					length = int(pipeType[3])
+					for i in range(length):
+						scriptTree.expect("\n")
+						num = float(scriptTree.before.decode(encoding='utf-8').split(':')[1])
+
+						if i != 0:
+							arrayStr += ','
+
+						if num.is_integer():
+							arrayStr += str(int(num))
+						else:
+							arrayStr += str(num)
+
+				#display
+				self.info_constValue.delete(0,'end')
+				self.info_constValue['state'] = 'normal'
+				self.info_constValue.insert(0,arrayStr)
 
 	#####################################################################
 
@@ -637,7 +710,18 @@ class Application(tk.Frame):
 			self.nodeArea.create_line(leftPos[0],leftPos[1],rightPos[0],rightPos[1],width=2)
 
 		self.master.after(20,self.nodeAreaDraw)
-	
+
+	def updateInfo(self):	
+		#update display
+		(node,pipes) = self.displayNode
+		for item in self.info_nodePipes.get_children():
+			self.info_nodePipes.delete(item)
+		for pipe in pipes:
+			self.info_nodePipes.insert(parent='', index='end' ,values=pipe)
+		self.info_nodeName['text'] = ' ' + node.name
+		self.info_nodeId['text'] = 'id: ' + node.id
+		self.info_constValue.delete(0,'end')
+		self.info_constValue['state'] = 'disable'
 
 	def resizeChildWeight(self):
 		#エラー回避
