@@ -6,9 +6,13 @@ import tkinter as tk
 from tkinter import ttk
 import tkinter.filedialog
 import tkinter.simpledialog as simpledialog
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import pandas as pd
 import pexpect
 from dataclasses import dataclass
 from enum import Enum
+import pickle
 
 @dataclass	
 class NodeType:
@@ -66,14 +70,18 @@ def checkAreaBorder(value,center,halfWidth):
 def isInWidget(x,y,wight):
 	return x > wight.winfo_x() and x < (wight.winfo_x()+ wight.winfo_width()) and y > wight.winfo_y() and y < (wight.winfo_y()+ wight.winfo_height())
 
-def openFile(dir,ex):
-	fTyp = [(dir, ex)]
-	iDir = os.path.abspath(os.path.dirname(__file__))
-	return tkinter.filedialog.askopenfilename(filetypes=fTyp, initialdir=iDir)
+def openFile(f,ex,initStr = '',initDir = ''):
+	fTyp = [(f, ex)]
+	return tkinter.filedialog.askopenfilename(filetypes=fTyp, initialdir=initDir,initialfile=initStr)
+
+def openSaveFile(f,ex,initStr = '',initDir = ''):
+	fTyp = [(f, ex)]
+	return tkinter.filedialog.asksaveasfilename(filetypes=fTyp, initialdir=initDir,initialfile=initStr)
 
 def openFolder():
 	iDir = os.path.abspath(os.path.dirname(__file__))
 	return tkinter.filedialog.askdirectory(initialdir=iDir)
+	
 
 def loadFile(path):
 	l = list()
@@ -81,8 +89,33 @@ def loadFile(path):
 	with open(path) as f:
 		for line in f:
 			l.append(line.strip("\n").split(" "))
+	l.sort()
 
-	return l
+	retList = list()
+	tmpList = list()
+	for e in l:
+		splitElement = e[0].split('/')
+		if len(splitElement) > 2:
+			if len(tmpList) != 0:
+				if tmpList[0][0].split('/')[-2] != splitElement[-2]:
+					tmpList.sort(key= lambda str: len(str[0]))
+					retList += tmpList
+					tmpList = list()
+
+
+			tmpList.append(e)
+		else:
+			if len(tmpList) != 0:
+				tmpList.sort(key= lambda str: len(str[0]))
+				retList += tmpList
+				tmpList = list()
+			retList.append(e)
+
+	if len(tmpList) != 0:
+		tmpList.sort(key= lambda str: len(str[0]))
+		retList += tmpList
+
+	return retList
 
 
 def saveFile(path,data):
@@ -101,6 +134,7 @@ def scanFolder(folder):
 			if os.path.splitext(fileName)[1] == '.node':
 				fList.append(fileName)
 
+	fList.sort()
 	return fList
 
 def getLatestFolder(folder):
@@ -132,6 +166,7 @@ class Application(tk.Frame):
 		self.focuseObject = FoucusObj.No,None
 		self.displayNode = None
 		self.editConst = None
+		self.info_graph_width = 100
 
 		#ウィンドウの生成
 		self.master.title("scriptTreeGUI")
@@ -147,6 +182,8 @@ class Application(tk.Frame):
 		fileMenu = tk.Menu(self.menubar, tearoff=0)
 		fileMenu.add_command(label="Open Node File", command=self.openNodeFile)
 		fileMenu.add_command(label="Open Node Folder", command=self.openNodeFolder)
+		fileMenu.add_command(label="Save project", command=self.nodeSystemSave)
+		fileMenu.add_command(label="Load project", command=self.nodeSystemLoad)
 		self.menubar.add_cascade(label="File",menu=fileMenu)
 		self.menubar.add_separator()
 		timerMenu = tk.Menu(self.menubar, tearoff=0)
@@ -210,13 +247,16 @@ class Application(tk.Frame):
 		self.info_logArea = ttk.Notebook(self.info)
 		self.info_logArea.place(relx=0.05,y = 360,relwidth=0.9,height=300)
 		self.info_logPage = tk.Frame(self.info_logArea)
-		self.info_graphPage = tk.Frame(self.info_logArea)
 		self.info_logArea.add(self.info_logPage, text=' log ')
 		self.info_debugLog = tk.Text(self.info_logPage,state='disabled')
 		scrollbar = ttk.Scrollbar(self.info_logPage, orient='vertical', command=self.info_debugLog.yview)
 		self.info_debugLog['yscrollcommand'] = scrollbar.set
 		scrollbar.pack(side='right',fill="y")
 		self.info_debugLog.pack(side='left',fill='both',expand=True) 
+		self.info_graphPage = tk.Frame(self.info_logArea)
+		self.info_logFiguar = plt.figure()
+		self.info_logGraph = FigureCanvasTkAgg(self.info_logFiguar, master=self.info_graphPage)
+		self.info_logGraph.get_tk_widget().pack(side='left',fill='both',expand=True)
 		self.info_logArea.add(self.info_graphPage, text=' graph ')
 		self.subWindow.add(self.info, text=' info ')
 
@@ -227,14 +267,10 @@ class Application(tk.Frame):
 	def nodeSystemTimerRun(self):
 		scriptTree.expect(">>>")
 		scriptTree.sendline("timer run")
-		scriptTree.expect("\n")
-		scriptTree.expect("\n")
 		
 	def nodeSystemTimerStop(self):
 		scriptTree.expect(">>>")
 		scriptTree.sendline("timer stop")
-		scriptTree.expect("\n")
-		scriptTree.expect("\n")
 
 	def nodeSystemTimerSet(self):
 		global scriptTreeTimerValue
@@ -243,9 +279,48 @@ class Application(tk.Frame):
 		if scriptTreeTimerValue != None:
 			scriptTree.expect(">>>")
 			scriptTree.sendline("timer set " + str(scriptTreeTimerValue))
-			scriptTree.expect("\n")
-			scriptTree.expect("\n")
+		
+	
+	def nodeSystemSave(self):
+		filePath = openSaveFile('SaveFile',"*.binbin",initStr='save.binbin',initDir=workSpace)
 
+		if len(filePath) != 0:
+
+			with open(filePath+'py',"wb") as f:
+				pickle.dump((self.paintNodes,self.connectList), f)
+				scriptTree.expect(">>>")
+				scriptTree.sendline("save " + filePath)
+
+
+	def nodeSystemLoad(self):
+		filePath = openFile('LoadFile',"*.binbin",initDir=workSpace)
+
+		if len(filePath) != 0:
+
+			with open(filePath+'py',"rb") as f:
+				(self.paintNodes,self.connectList) = pickle.load(f)
+				global scriptTree
+
+				scriptTree.expect(">>>")
+				scriptTree.sendline("quit")
+
+				# lunch
+				if os.path.isfile('./scriptTree'):
+					scriptTree = pexpect.spawn('./scriptTree lunch')
+				else:
+					scriptTree = pexpect.spawn('scriptTree lunch')
+				scriptTree.expect("\n")
+				if scriptTree.before.decode(errors='ignore',encoding='utf-8') != 'lunch success.\r':
+					print('Failed lunch scriptTree')
+					exit(1)
+
+				scriptTree.expect(">>>")
+				scriptTree.sendline("load "+filePath)
+				
+				global logFolder
+				logFolder = getLatestFolder(workSpace + '/Logs')
+				
+				
 		
 	def openNodeFile(self):
 		fileName = openFile("nodeファイル","*.node")
@@ -318,9 +393,11 @@ class Application(tk.Frame):
 					self.connectList.pop(i)
 
 				#ノード削除
+				self.displayNode = None
 
 				scriptTree.expect(">>>")
 				scriptTree.sendline("kill "+self.focuseObject[1])
+				
 
 				deleateIndex = -1
 				for index,(node,pipes) in enumerate(self.paintNodes):
@@ -339,7 +416,7 @@ class Application(tk.Frame):
 				scriptTree.expect("\n")
 				scriptTree.expect("\n")
 
-				if scriptTree.before.decode(encoding='utf-8').split(' ')[2] != 'success\r':
+				if scriptTree.before.decode(errors='ignore',encoding='utf-8').split(' ')[2] != 'success\r':
 					self.updateInfo()
 
 			
@@ -467,7 +544,7 @@ class Application(tk.Frame):
 					scriptTree.expect("\n")
 					scriptTree.expect("\n")
 					
-					if scriptTree.before.decode(encoding='utf-8').split(" ")[2] != 'success\r':
+					if scriptTree.before.decode(errors='ignore',encoding='utf-8').split(" ")[2] != 'success\r':
 						print("run node failed")
 					else:
 						scriptTree.expect(">>>")
@@ -475,33 +552,33 @@ class Application(tk.Frame):
 
 						pipeList = list()
 						scriptTree.expect("\n")
-						line = scriptTree.before.decode(encoding='utf-8')
+						line = scriptTree.before.decode(errors='ignore',encoding='utf-8')
 						inputCount = 0
 						outputCount = 0
 						while not '--------------------------------------------------------' in line:
 							scriptTree.expect("\n")
-							line = scriptTree.before.decode(encoding='utf-8')
+							line = scriptTree.before.decode(errors='ignore',encoding='utf-8')
 							if "name: "+node.id+"\r" in line:
 								scriptTree.expect("\n")
 								scriptTree.expect("\n")
 								scriptTree.expect("\n")
-								line = scriptTree.before.decode(encoding='utf-8')
+								line = scriptTree.before.decode(errors='ignore',encoding='utf-8')
 								while not '------------------------------------------' in line:
 									pipeName = line[:-1].split(":")[1]
 									scriptTree.expect("\n")
-									line = scriptTree.before.decode(encoding='utf-8')
+									line = scriptTree.before.decode(errors='ignore',encoding='utf-8')
 									pipeType = line[:-1].split(":")[1]
 									scriptTree.expect("\n")
-									line = scriptTree.before.decode(encoding='utf-8')
+									line = scriptTree.before.decode(errors='ignore',encoding='utf-8')
 									pipeUnit = line[:-1].split(":")[1]
 									scriptTree.expect("\n")
-									line = scriptTree.before.decode(encoding='utf-8')
+									line = scriptTree.before.decode(errors='ignore',encoding='utf-8')
 									pipeLength = line[:-1].split(":")[1]
 									scriptTree.expect("\n")
 									scriptTree.expect("\n")
 									if pipeType == 'IN':
 										scriptTree.expect("\n")
-									line = scriptTree.before.decode(encoding='utf-8')
+									line = scriptTree.before.decode(errors='ignore',encoding='utf-8')
 									pipeList.append((pipeName,pipeType,pipeUnit,pipeLength))
 
 									if pipeType == 'OUT':
@@ -669,11 +746,11 @@ class Application(tk.Frame):
 				arrayStr = ''
 
 				#parse
-				if scriptTree.before.decode(encoding='utf-8').split(' ')[2] == 'success:\r':
+				if scriptTree.before.decode(errors='ignore',encoding='utf-8').split(' ')[2] == 'success:\r':
 					length = int(pipeType[3])
 					for i in range(length):
 						scriptTree.expect("\n")
-						num = float(scriptTree.before.decode(encoding='utf-8').split(':')[1])
+						num = float(scriptTree.before.decode(errors='ignore',encoding='utf-8').split(':')[1])
 
 						if i != 0:
 							arrayStr += ','
@@ -728,12 +805,50 @@ class Application(tk.Frame):
 					outputCount += 1
 				else:
 					self.nodeArea.create_text(node.x + 3,(node.y+8) + inputCount * 16 ,text=pipeName,anchor='w')
-					self.nodeArea.create_line(node.x - 7,(node.y+8) + inputCount * 16 - 6,node.x-1,(node.y+8) + inputCount * 16,width=w,fill = c)
-					self.nodeArea.create_line(node.x - 7,(node.y+8) + inputCount * 16 + 6,node.x-1,(node.y+8) + inputCount * 16 ,width=w,fill = c)
+					if pipeType == 'IN':
+						self.nodeArea.create_line(node.x - 7,(node.y+8) + inputCount * 16 - 6,node.x-1,(node.y+8) + inputCount * 16,width=w,fill = c)
+						self.nodeArea.create_line(node.x - 7,(node.y+8) + inputCount * 16 + 6,node.x-1,(node.y+8) + inputCount * 16 ,width=w,fill = c)
 					inputCount += 1
 
 		for ((leftPipe,leftPos),(rightPipe,rightPos)) in self.connectList:
 			self.nodeArea.create_line(leftPos[0],leftPos[1],rightPos[0],rightPos[1],width=2)
+		
+		if self.displayNode != None:
+			isGraph = False
+			logFilePath = '*'
+			if os.path.isfile(logFolder + '/' + self.displayNode[0].id + '.txt'):
+				logFilePath = logFolder + '/' + self.displayNode[0].id + '.txt'
+			elif os.path.isfile(logFolder + '/' + self.displayNode[0].id + '.csv'):
+				isGraph = True
+				logFilePath = logFolder + '/' + self.displayNode[0].id + '.csv'
+
+
+			with open(logFilePath) as f:
+				fText = f.read(-1)
+				logLen = len(self.info_debugLog.get('1.0',tk.END))
+				if logLen < len(fText):
+					self.info_debugLog['state'] = 'normal'
+					viewPos = self.info_debugLog.yview()
+					self.info_debugLog.insert(tk.END,fText[logLen:])
+					if viewPos[1] == 1.0:
+						viewPos = self.info_debugLog.yview()
+						offset = 1.0 - viewPos[1]
+						self.info_debugLog.yview_moveto(viewPos[0]+offset)
+				
+					self.info_debugLog['state'] = 'disable'
+			
+			if isGraph:
+				plt.clf()
+				input_csv = pd.read_csv(logFilePath)
+				
+				dataBegin = 0
+				if len(input_csv) > self.info_graph_width:
+					dataBegin = len(input_csv) - self.info_graph_width
+
+				for key in input_csv.keys():
+					if key != input_csv.keys()[0]:
+						plt.plot(input_csv[input_csv.keys()[0]][dataBegin:],input_csv[key][dataBegin:],color = 'r')
+				self.info_logGraph.draw()
 
 		self.master.after(20,self.nodeAreaDraw)
 
@@ -748,6 +863,11 @@ class Application(tk.Frame):
 		self.info_nodeId['text'] = 'id: ' + node.id
 		self.info_constValue.delete(0,'end')
 		self.info_constValue['state'] = 'disable'
+		self.info_debugLog['state'] = 'normal'
+		self.info_debugLog.delete('1.0', tk.END)
+		self.info_debugLog['state'] = 'disable'
+		plt.clf()
+		self.info_logGraph.draw()
 
 	def resizeChildWeight(self):
 		#エラー回避
@@ -798,7 +918,7 @@ if __name__ == "__main__" and pf.system() == "Linux":
 	else:
 		scriptTree = pexpect.spawn('scriptTree lunch')
 	scriptTree.expect("\n")
-	if scriptTree.before.decode(encoding='utf-8') != 'lunch success.\r':
+	if scriptTree.before.decode(errors='ignore',encoding='utf-8') != 'lunch success.\r':
 		print('Failed lunch scriptTree')
 		exit(1)
 
