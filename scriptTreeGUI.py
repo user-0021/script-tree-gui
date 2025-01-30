@@ -7,7 +7,7 @@ from tkinter import ttk
 import tkinter.filedialog
 import tkinter.simpledialog as simpledialog
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg,NavigationToolbar2Tk
 import pandas as pd
 import pexpect
 from dataclasses import dataclass
@@ -23,6 +23,7 @@ class NodeType:
 	height : int
 	x : int
 	y : int
+	isFliped : bool
 
 class GrabType(Enum):
 	No = 0
@@ -166,7 +167,7 @@ class Application(tk.Frame):
 		self.focuseObject = FoucusObj.No,None
 		self.displayNode = None
 		self.editConst = None
-		self.info_graph_width = 100
+		self.info_graph_width = 500
 
 		#ウィンドウの生成
 		self.master.title("scriptTreeGUI")
@@ -256,6 +257,7 @@ class Application(tk.Frame):
 		self.info_graphPage = tk.Frame(self.info_logArea)
 		self.info_logFiguar = plt.figure()
 		self.info_logGraph = FigureCanvasTkAgg(self.info_logFiguar, master=self.info_graphPage)
+		NavigationToolbar2Tk(self.info_logGraph, self.info_graphPage)
 		self.info_logGraph.get_tk_widget().pack(side='left',fill='both',expand=True)
 		self.info_logArea.add(self.info_graphPage, text=' graph ')
 		self.subWindow.add(self.info, text=' info ')
@@ -418,6 +420,40 @@ class Application(tk.Frame):
 
 				if scriptTree.before.decode(errors='ignore',encoding='utf-8').split(' ')[2] != 'success\r':
 					self.updateInfo()
+		elif event.keysym == 'f' or event.keysym == 'F':
+			if self.focuseObject[0] == FoucusObj.Node:
+				targetIndex = -1
+				for index,(node,pipes) in enumerate(self.paintNodes):
+					if node.id == self.focuseObject[1]:
+						targetIndex = index
+
+				if targetIndex != -1:
+					self.paintNodes[targetIndex][0].isFliped = not self.paintNodes[targetIndex][0].isFliped
+
+					moveX = 14
+
+					for i in range(len(self.connectList)):
+						((leftPipe,leftPos),(rightPipe,rightPos)) = self.connectList[i]
+						if self.paintNodes[targetIndex][0].id == leftPipe[0]:
+							_moveX = 0
+							if self.paintNodes[targetIndex][0].isFliped:
+								_moveX = self.paintNodes[targetIndex][0].width
+							else:
+								_moveX = - self.paintNodes[targetIndex][0].width
+
+							leftPos = (leftPos[0] + _moveX, leftPos[1])
+						if self.paintNodes[targetIndex][0].id == rightPipe[0]:
+							_moveX = 0
+							if self.paintNodes[targetIndex][0].isFliped:
+								_moveX = -(14 + self.paintNodes[targetIndex][0].width)
+							else:
+								_moveX = 14 + self.paintNodes[targetIndex][0].width
+								
+							rightPos = (rightPos[0] + _moveX, rightPos[1])
+						
+						self.connectList[i] = ((leftPipe,leftPos),(rightPipe,rightPos))
+				
+
 
 			
 				
@@ -489,11 +525,17 @@ class Application(tk.Frame):
 						for pipe in pipes:							
 							if pipe[1] == 'OUT':
 								if pipe[0] == self.mouseGrip[1][1]:
-									leftPipe = (pipe,(node.x + node.width +7,(node.y+8) + outputCount * 16))
+									if node.isFliped:
+										leftPipe = (pipe,(node.x - 7,(node.y+8) + outputCount * 16))
+									else:
+										leftPipe = (pipe,(node.x + node.width +7,(node.y+8) + outputCount * 16))
 								outputCount += 1
 							else:
 								if pipe[0] == self.mouseGrip[1][1]:
-									leftPipe = (pipe,(node.x,(node.y+8) + inputCount * 16))
+									if node.isFliped:
+										leftPipe = (pipe,(node.x + node.width,(node.y+8) + inputCount * 16))
+									else:
+										leftPipe = (pipe,(node.x,(node.y+8) + inputCount * 16))
 								inputCount += 1
 
 					if node.id == self.underCursor[0]:
@@ -503,11 +545,17 @@ class Application(tk.Frame):
 						for pipe in pipes:							
 							if pipe[1] == 'OUT':
 								if pipe[0] == self.underCursor[1]:
-									rightPipe = (pipe,(node.x + node.width +7,(node.y+8) + outputCount * 16))
+									if node.isFliped:
+										rightPipe = (pipe,(node.x - 7,(node.y+8) + outputCount * 16))
+									else:
+										rightPipe = (pipe,(node.x + node.width +7,(node.y+8) + outputCount * 16))
 								outputCount += 1
 							else:
 								if pipe[0] == self.underCursor[1]:
-									rightPipe = (pipe,(node.x,(node.y+8) + inputCount * 16))
+									if node.isFliped:
+										rightPipe = (pipe,(node.x + node.width,(node.y+8) + inputCount * 16))
+									else:
+										rightPipe = (pipe,(node.x,(node.y+8) + inputCount * 16))
 								inputCount += 1
 
 				if leftPipe[0][2] == rightPipe[0][2] and leftPipe[0][3] == rightPipe[0][3] and leftPipe[0][1] != rightPipe[0][1] and leftPipe[0][1] != 'CONST' and rightPipe[0][1] != 'CONST':
@@ -534,7 +582,7 @@ class Application(tk.Frame):
 					#NodeDataの生成
 					global nodeIdlate
 					fileName = os.path.splitext(os.path.basename(self.mouseGrip[1].cget("text")))[0]
-					node = NodeType(x=x,y=y,width=100,height=100,path = self.mouseGrip[1].cget("text"),name=fileName ,id=str(nodeIdlate))
+					node = NodeType(x=x,y=y,width=100,height=100,path = self.mouseGrip[1].cget("text"),name=fileName ,id=str(nodeIdlate),isFliped=False)
 					nodeIdlate+=1
 
 					#Nodeの生成
@@ -652,24 +700,24 @@ class Application(tk.Frame):
 					if node.y < y and (node.y+node.height) > y:
 
 						if (node.x - 10) < x  and node.x > x:#IN側矢印
-							inCount = int((y - node.y) / 16)
+							pipeCount = int((y - node.y) / 16)
 							for (pipeName,pipeType,pipeUnit,pipeLength) in pipes:
-								if pipeType != 'OUT':
-									if inCount == 0:
+								if (pipeType != 'OUT' and not node.isFliped) or (pipeType == 'OUT' and node.isFliped):
+									if pipeCount == 0:
 										self.underCursor = (node.id,pipeName)
 										break
 									else:
-										inCount-=1
+										pipeCount-=1
 
 						elif (node.x + node.width) < x  and (node.x + node.width + 10) > x:#OUT側矢印
-							outCount = int((y - node.y) / 16)
+							pipeCount = int((y - node.y) / 16)
 							for (pipeName,pipeType,pipeUnit,pipeLength) in pipes:
-								if pipeType == 'OUT':
-									if outCount == 0:
+								if (pipeType == 'OUT' and not node.isFliped) or (pipeType != 'OUT' and node.isFliped):
+									if pipeCount == 0:
 										self.underCursor = (node.id,pipeName)
 										break
 									else:
-										outCount-=1
+										pipeCount-=1
 
 
 	
@@ -793,21 +841,41 @@ class Application(tk.Frame):
 					y = self.master.winfo_pointery() -self.master.winfo_rooty()
 
 					if pipeType == 'OUT':
-						self.nodeArea.create_line(node.x + node.width +7,(node.y+8) + outputCount * 16,x,y,width=w,fill = c)
+						if node.isFliped:
+							self.nodeArea.create_line(node.x-7,(node.y+8) + outputCount * 16,x,y,width=w,fill = c)
+						else:
+							self.nodeArea.create_line(node.x + node.width +7,(node.y+8) + outputCount * 16,x,y,width=w,fill = c)
 					else:
-						self.nodeArea.create_line(node.x,(node.y+8) + inputCount * 16,x,y,width=w,fill = c)
+						if node.isFliped:
+							self.nodeArea.create_line(node.x + node.width,(node.y+8) + inputCount * 16,x,y,width=w,fill = c)
+						else:
+							self.nodeArea.create_line(node.x,(node.y+8) + inputCount * 16,x,y,width=w,fill = c)
 
 
 				if pipeType == 'OUT':
-					self.nodeArea.create_text(node.x+ node.width - 3,(node.y+8) + outputCount * 16 ,text=pipeName,anchor='e')
-					self.nodeArea.create_line(node.x+ node.width,(node.y+8) + outputCount * 16 - 6,node.x+node.width+7,(node.y+8) + outputCount * 16,width=w,fill = c)
-					self.nodeArea.create_line(node.x+ node.width,(node.y+8) + outputCount * 16 + 6,node.x+node.width+7,(node.y+8) + outputCount * 16 ,width=w,fill = c)
+					if node.isFliped:
+						self.nodeArea.create_text(node.x + 3,(node.y+8) + outputCount * 16 ,text=pipeName,anchor='w')
+						self.nodeArea.create_line(node.x - 1,(node.y+8) + outputCount * 16 - 6,node.x-7,(node.y+8) + outputCount * 16,width=w,fill = c)
+						self.nodeArea.create_line(node.x - 1,(node.y+8) + outputCount * 16 + 6,node.x-7,(node.y+8) + outputCount * 16 ,width=w,fill = c)
+					else:
+						self.nodeArea.create_text(node.x+ node.width - 3,(node.y+8) + outputCount * 16 ,text=pipeName,anchor='e')
+						self.nodeArea.create_line(node.x+ node.width,(node.y+8) + outputCount * 16 - 6,node.x+node.width+7,(node.y+8) + outputCount * 16,width=w,fill = c)
+						self.nodeArea.create_line(node.x+ node.width,(node.y+8) + outputCount * 16 + 6,node.x+node.width+7,(node.y+8) + outputCount * 16 ,width=w,fill = c)
+
+
 					outputCount += 1
 				else:
-					self.nodeArea.create_text(node.x + 3,(node.y+8) + inputCount * 16 ,text=pipeName,anchor='w')
-					if pipeType == 'IN':
-						self.nodeArea.create_line(node.x - 7,(node.y+8) + inputCount * 16 - 6,node.x-1,(node.y+8) + inputCount * 16,width=w,fill = c)
-						self.nodeArea.create_line(node.x - 7,(node.y+8) + inputCount * 16 + 6,node.x-1,(node.y+8) + inputCount * 16 ,width=w,fill = c)
+					if node.isFliped:
+						self.nodeArea.create_text(node.x+ node.width - 3,(node.y+8) + inputCount * 16 ,text=pipeName,anchor='e')
+						if pipeType == 'IN':
+							self.nodeArea.create_line(node.x+ node.width+7,(node.y+8) + inputCount * 16 - 6,node.x+node.width,(node.y+8) + inputCount * 16,width=w,fill = c)
+							self.nodeArea.create_line(node.x+ node.width+7,(node.y+8) + inputCount * 16 + 6,node.x+node.width,(node.y+8) + inputCount * 16 ,width=w,fill = c)
+					else:
+						self.nodeArea.create_text(node.x + 3,(node.y+8) + inputCount * 16 ,text=pipeName,anchor='w')
+						if pipeType == 'IN':
+							self.nodeArea.create_line(node.x - 7,(node.y+8) + inputCount * 16 - 6,node.x-1,(node.y+8) + inputCount * 16,width=w,fill = c)
+							self.nodeArea.create_line(node.x - 7,(node.y+8) + inputCount * 16 + 6,node.x-1,(node.y+8) + inputCount * 16 ,width=w,fill = c)
+					
 					inputCount += 1
 
 		for ((leftPipe,leftPos),(rightPipe,rightPos)) in self.connectList:
@@ -837,18 +905,18 @@ class Application(tk.Frame):
 				
 					self.info_debugLog['state'] = 'disable'
 			
-			if isGraph:
-				plt.clf()
-				input_csv = pd.read_csv(logFilePath)
-				
-				dataBegin = 0
-				if len(input_csv) > self.info_graph_width:
-					dataBegin = len(input_csv) - self.info_graph_width
+					if isGraph:
+						plt.clf()
+						input_csv = pd.read_csv(logFilePath)
+						
+						dataBegin = 0
+						if len(input_csv) > self.info_graph_width:
+							dataBegin = len(input_csv) - self.info_graph_width
 
-				for key in input_csv.keys():
-					if key != input_csv.keys()[0]:
-						plt.plot(input_csv[input_csv.keys()[0]][dataBegin:],input_csv[key][dataBegin:],color = 'r')
-				self.info_logGraph.draw()
+						for key in input_csv.keys():
+							if key != input_csv.keys()[0]:
+								plt.plot(input_csv[input_csv.keys()[0]][dataBegin:],input_csv[key][dataBegin:],color = 'r')
+						self.info_logGraph.draw()
 
 		self.master.after(20,self.nodeAreaDraw)
 
