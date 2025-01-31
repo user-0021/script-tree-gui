@@ -914,8 +914,6 @@ class Application(tk.Frame):
 				isGraph = True
 				logFilePath = logFolder + '/' + self.displayNode[0].id + '.csv'
 
-			print('path: '+logFilePath)
-
 			with open(logFilePath) as f:
 				fText = f.read(-1)
 				logLen = len(self.info_debugLog.get('1.0',tk.END))
