@@ -189,9 +189,16 @@ class Application(tk.Frame):
 		self.menubar.add_separator()
 		timerMenu = tk.Menu(self.menubar, tearoff=0)
 		timerMenu.add_command(label="Timer Run", command=self.nodeSystemTimerRun)
+		timerMenu.add_command(label="Timer Run With Limit", command=self.nodeSystemTimerRunWithLimit)
 		timerMenu.add_command(label="Timer Stop", command=self.nodeSystemTimerStop)
 		timerMenu.add_command(label="Timer Set", command=self.nodeSystemTimerSet)
 		self.menubar.add_cascade(label="Timer",menu=timerMenu)
+		self.menubar.add_separator()
+		self.menubar.add_cascade(label="File",menu=fileMenu)
+		self.menubar.add_separator()
+		graphMenu = tk.Menu(self.menubar, tearoff=0)
+		graphMenu.add_command(label="Graph Set Limit", command=self.nodeSetGraphLimit)
+		self.menubar.add_cascade(label="Graph",menu=graphMenu)
 		self.menubar.add_separator()
 
 		#フレームを生成
@@ -269,6 +276,13 @@ class Application(tk.Frame):
 	def nodeSystemTimerRun(self):
 		scriptTree.expect(">>>")
 		scriptTree.sendline("timer run")
+
+	def nodeSystemTimerRunWithLimit(self):
+		waitTime = simpledialog.askinteger("Input Box", "timer time limit[ms]")
+		if waitTime != None and waitTime > 0:
+			self.nodeSystemTimerRun()
+			time.sleep(float(waitTime)/1000.0)
+			self.nodeSystemTimerStop()
 		
 	def nodeSystemTimerStop(self):
 		scriptTree.expect(">>>")
@@ -276,20 +290,26 @@ class Application(tk.Frame):
 
 	def nodeSystemTimerSet(self):
 		global scriptTreeTimerValue
-		scriptTreeTimerValue = simpledialog.askfloat("Input Box", "Wakeup timer period[ms]",initialvalue=float(scriptTreeTimerValue))
+		tmp = simpledialog.askfloat("Input Box", "Wakeup timer period[ms]",initialvalue=float(scriptTreeTimerValue))
 		
-		if scriptTreeTimerValue != None:
+		if tmp != None:
+			scriptTreeTimerValue = tmp
 			scriptTree.expect(">>>")
 			scriptTree.sendline("timer set " + str(scriptTreeTimerValue))
 		
-	
+	def nodeSetGraphLimit(self):
+		limitLength = simpledialog.askinteger("Input Box", "graph limit",initialvalue=self.info_graph_width)
+		
+		if limitLength != None:
+			self.info_graph_width = limitLength
+
 	def nodeSystemSave(self):
 		filePath = openSaveFile('SaveFile',"*.binbin",initStr='save.binbin',initDir=workSpace)
 
 		if len(filePath) != 0:
 
 			with open(filePath+'py',"wb") as f:
-				pickle.dump((self.paintNodes,self.connectList), f)
+				pickle.dump((self.paintNodes,self.connectList,scriptTreeTimerValue,self.info_graph_width), f)
 				scriptTree.expect(">>>")
 				scriptTree.sendline("save " + filePath)
 
@@ -299,8 +319,10 @@ class Application(tk.Frame):
 
 		if len(filePath) != 0:
 
+			global scriptTreeTimerValue
+				
 			with open(filePath+'py',"rb") as f:
-				(self.paintNodes,self.connectList) = pickle.load(f)
+				(self.paintNodes,self.connectList,scriptTreeTimerValue,self.info_graph_width) = pickle.load(f)
 				global scriptTree
 
 				scriptTree.expect(">>>")
@@ -321,7 +343,9 @@ class Application(tk.Frame):
 				
 				global logFolder
 				logFolder = getLatestFolder(workSpace + '/Logs')
-				
+
+				scriptTree.expect(">>>")
+				scriptTree.sendline("timer set " + str(scriptTreeTimerValue))
 				
 		
 	def openNodeFile(self):
@@ -890,6 +914,7 @@ class Application(tk.Frame):
 				isGraph = True
 				logFilePath = logFolder + '/' + self.displayNode[0].id + '.csv'
 
+			print('path: '+logFilePath)
 
 			with open(logFilePath) as f:
 				fText = f.read(-1)
@@ -913,9 +938,15 @@ class Application(tk.Frame):
 						if len(input_csv) > self.info_graph_width:
 							dataBegin = len(input_csv) - self.info_graph_width
 
-						for key in input_csv.keys():
-							if key != input_csv.keys()[0]:
-								plt.plot(input_csv[input_csv.keys()[0]][dataBegin:],input_csv[key][dataBegin:],color = 'r')
+						if self.info_graph_width > 0:
+							for key in input_csv.keys():
+								if key != input_csv.keys()[0]:
+									plt.plot(input_csv[input_csv.keys()[0]][dataBegin:],input_csv[key][dataBegin:],color = 'r')
+						else:
+							for key in input_csv.keys():
+								if key != input_csv.keys()[0]:
+									plt.plot(input_csv[input_csv.keys()[0]],input_csv[key],color = 'r')
+
 						self.info_logGraph.draw()
 
 		self.master.after(20,self.nodeAreaDraw)
