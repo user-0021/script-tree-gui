@@ -309,7 +309,7 @@ class Application(tk.Frame):
 		if len(filePath) != 0:
 
 			with open(filePath+'py',"wb") as f:
-				pickle.dump((self.paintNodes,self.connectList,scriptTreeTimerValue,self.info_graph_width), f)
+				pickle.dump((self.paintNodes,self.connectList,scriptTreeTimerValue,nodeIdlate,self.info_graph_width), f)
 				scriptTree.expect(">>>")
 				scriptTree.sendline("save " + filePath)
 
@@ -320,9 +320,10 @@ class Application(tk.Frame):
 		if len(filePath) != 0:
 
 			global scriptTreeTimerValue
+			global nodeIdlate
 				
 			with open(filePath+'py',"rb") as f:
-				(self.paintNodes,self.connectList,scriptTreeTimerValue,self.info_graph_width) = pickle.load(f)
+				(self.paintNodes,self.connectList,scriptTreeTimerValue,nodeIdlate,self.info_graph_width) = pickle.load(f)
 				global scriptTree
 
 				scriptTree.expect(">>>")
@@ -346,6 +347,7 @@ class Application(tk.Frame):
 
 				scriptTree.expect(">>>")
 				scriptTree.sendline("timer set " + str(scriptTreeTimerValue))
+			
 				
 		
 	def openNodeFile(self):
